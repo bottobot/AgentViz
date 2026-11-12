@@ -10,6 +10,12 @@
   --files: #72b9f2; --edits: #69cfb4; --shell: #d4bb79;
   --network: #b3a3f0; --agents: #e79fcb; --memory: #96b7c8; --other: #92a1b0;
 }
+/* The station colours above are chosen for dark backgrounds; on a light theme they measure under 2.2:1 as text.
+   Light themes get darker ones, each at least 4.5:1 on white and on the light side bar colour. */
+body.vscode-light, body.vscode-high-contrast-light {
+  --files: #1b6aa8; --edits: #12705a; --shell: #7a5c00;
+  --network: #5a48b8; --agents: #a03478; --memory: #3b697d; --other: #566472;
+}
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.5 var(--vscode-font-family, system-ui, sans-serif); }
 [hidden] { display: none !important; }

@@ -14,7 +14,7 @@ The executable schedule is `workflows/agentviz-next.plan.json`, named **AgentViz
 | S06 file footprint | Implemented, awaiting board review | b43ef6 (plan card a40b39) | See `git log` on `task/b43ef6` (commit titled "feat: show a file activity footprint (S06)") | `npm test` 95/95, `npm run check` exit 0, local sample 40 + 40 transcripts; Codex not covered locally, see S06 below |
 | S07 AgentBoard entry command | Implemented, awaiting board review | aaa089 (plan card a40b39) | See `git log` on `task/aaa089` (commit titled "feat: add a narrow entry command for another extension (S07)") | `npm test` 102/102, `npm run check` exit 0, VS Code host run 13/13 checks; no AgentBoard caller exists, see S07 below |
 | S08 reliability and cost | Implemented, awaiting board review | 5df10f (plan card a40b39) | See `git log` on `task/5df10f` (commit titled "fix: harden the combined view and record its cost (S08)") | `npm test` 117/117, `npm run check` exit 0, synthetic benchmark of 3,471 transcripts; not run in a webview, see S08 below |
-| S09 Windows acceptance | Pending | Not allocated | None | Not run |
+| S09 Windows acceptance | Implemented, awaiting board review | 72183c (plan card a40b39) | See `git log` on `task/72183c` (commit titled "test: make Windows acceptance repeatable (S09)") | `npm test` 123/123, `npm run check` exit 0, `npm run host` 31 checks (32 with `--clipboard`), `npm run browser` 11/11; Linux, VSCodium and a live AgentBoard caller unverified, see S09 below |
 | S10 review and local package | Pending | Not allocated | None | Not run |
 
 Next action: open AgentBoard's **Run a Plan** picker in this workspace, select **AgentViz: find and follow sessions**, inspect the preview and choose Run. This record does not imply that the run is already approved or executing.
@@ -678,4 +678,61 @@ New test support, with no behaviour of its own: `test/resilience-fixture.js` (sy
 - The longest-block figures are from Node's event loop monitor at 1 ms resolution on Windows; they bound host responsiveness, not the webview's.
 - Contrast and screen reader output were not measured. Linux and VSCodium were not run.
 
-Next action: board review of `task/5df10f`, then S09.
+Next action at the end of S08: board review of `task/5df10f`, then S09 (now done, below).
+
+## S09: Make Windows acceptance repeatable
+
+Owner: card `72183c`, branch `task/72183c`, AgentBoard worktree. Dependency commit: `a03ac6a` (S08 integrated). Code commit: the commit on this branch titled "test: make Windows acceptance repeatable (S09)". Review and integration: pending, done by the board.
+
+### Headline
+
+The host run and the browser inspection are now two repeatable commands, each with its own receipt, and both pass on this machine. The host run drives the **real webview**, which closes the "not run in a VS Code host" gap recorded by S02 to S08. One product defect was found and fixed (station colours on light themes). **The milestone stays open for:** Linux and VSCodium, a live AgentBoard caller, and screen reader output. Full detail: `docs/development/agentviz-next-evidence.md`.
+
+**Scope note for the reviewer.** `media/style.css` is outside the files listed for this card. Six lines were added there because the required light theme contrast check failed without them. Nothing else in `media/` or `src/` changed.
+
+### What changed
+
+- `test/host-runner.js` (new, `npm run host`): locates and verifies `Code.exe` from its install records, makes a temporary profile and source folder, starts the host, judges the result, stops only its own processes, removes its folder.
+- `test/extension-host.js`: from 13 to 32 checks. It now writes a 93-transcript synthetic source and drives the real webview over the window's debugging port. A failed check is recorded and the run goes on.
+- `test/browser-check.js` (new, `npm run browser`): headless Edge or Chrome, real key presses, the real host code behind the page, 1280, 600 and 360 px.
+- `test/cdp.js`, `test/page-probes.js`, `test/acceptance-fixture.js` (new): the protocol client, the in-page measurements (contrast, focus ring, names, layout, view state) and the shared synthetic source. No dependency was added.
+- `test/host-runner.test.js` (new, part of `npm test`): six tests.
+- `package.json`: scripts `host` and `browser`. `workflows/checks.json`: checks `host` and `browser`, added after both commands passed.
+- `media/style.css`: darker station colours for light themes.
+
+### Checks (worktree, PowerShell 7, Node v26.7.0)
+
+| Command | Result |
+| --- | --- |
+| `npm test` | exit 0: 123 tests, 123 pass, 0 fail |
+| `npm run check` | exit 0 |
+| `npm run host` | exit 0: VS Code 1.146.0, 31 checks passed, 1 optional not run (clipboard), 36.7 s |
+| `npm run host -- --clipboard` | exit 0: 32 checks passed, 0 not run, 38.4 s |
+| `npm run browser` | exit 0: Edge 157 headless, 11 of 11 checks |
+| First host run, before the stylesheet change | exit 1: light theme contrast failed, 13 text items at 1.77:1 to 2.10:1 |
+| `node --test --test-name-pattern="station colours" test/host-runner.test.js` on the previous stylesheet | 0 pass, 1 fail ("Light themes have their own station colours") |
+
+Regressions added (6 unit tests in `test/host-runner.test.js`): the executable is verified with no silent fallback; a run never uses a normal profile or a folder outside its own; only a complete passing result from the verified executable counts (missing, unreadable, `null`, failed, incomplete, not-run, wrong version, bad exit code, timeout); a stand-in host showing that missing and failed results fail and that a leftover process of the run is stopped while a bystander process is not; the browser is taken as given; station colours reach AA on dark and light. The first five fail before the runner exists; the `null` case failed against the runner's first draft and caught a real hole. The host and browser checks themselves are the regressions for the acceptance behaviour and are not part of `npm test`.
+
+### Results in short
+
+- Host, all in the real webview: open, reuse, close, reopen; workspace selection reaching a project outside the returned 80; name filter with duplicate names; full and partial ID beyond the list; no matches; a Claude and a Codex rename with the selection unmoved; family lanes; a selected subagent; example against real; Tab order and focus rings; accessible names; contrast on Dark Modern (lowest 6.08:1) and Light Modern (lowest 4.78:1); a missing source folder, both missing, and a deleted followed session; no private sentinel or path in the page; no console or policy errors, with a control that proves a violation would be seen; the entry command, with the view showing each addressed session.
+- Browser: example and live labels; keyboard-only use; accessible names from the browser's accessibility tree; contrast (lowest 6.61:1) and layout at three widths; markup in a saved name shown as text.
+- **S08's open cost question is answered.** At full retention (58,000 events, 6.47 MB per message) the real webview spends a median of 86 ms, at most 114 ms, on each once-a-second message. No change was made.
+
+### Evidence
+
+- `docs/development/agentviz-next-evidence.md`: every check, the measurements, observations and what is unverified.
+- In this worktree, git-ignored and local only, synthetic data: `artifacts/host/extension-host-result.json` and `artifacts/host/shots/` (6 screenshots of the host window); `artifacts/browser/browser-check.json` and 8 screenshots; `artifacts/s09/` (`unit-run.txt`, `syntax-run.txt`, `host-run.txt`, `browser-run.txt`, `host-result-with-clipboard.json`, `baseline-before-change.txt`).
+
+### Gaps and limits
+
+- **Unverified, milestone open:** Linux, VSCodium, remote and web hosts; a live AgentBoard caller; screen reader output; high contrast themes and themes other than the two defaults; contrast of graphics (text only was measured).
+- Narrow widths (600 and 360 px) were checked in the browser, not inside VS Code, where the page had about 850 px.
+- Copy ID reaching the clipboard is checked only with `--clipboard`, because it overwrites the clipboard. It passed once.
+- The host check opens a visible VS Code window for about 40 seconds and needs a desktop session. It uses a debugging port on a free local port of that one isolated window; the product itself still opens no port.
+- A Codex subagent was not followed in the host. No real transcript was read in this step.
+- Observations left unchanged (in the evidence file): the empty area under the map at desktop width; equal ID fragments for subagents whose IDs share eight characters; the deleted session staying in the list; the real style source of a webview containing VS Code's own host pattern, which the S08 record did not show.
+- `README.md` does not mention `npm run host` or `npm run browser`. Pending for S10, which owns the README.
+
+Next action: board review of `task/72183c`, then S10.

@@ -1,13 +1,23 @@
 {
   "unit": {
     "run": "npm test",
-    "what": "AgentViz Node tests, including parser, discovery, view and host message regressions. This does not prove browser or VS Code GUI acceptance.",
+    "what": "AgentViz Node tests, including parser, discovery, view, host message and host runner regressions. This does not prove browser or VS Code GUI acceptance; see host and browser.",
     "minutes": 2
   },
   "syntax": {
     "run": "npm run check",
     "what": "Syntax checks for the production JavaScript files named by the existing script.",
     "minutes": 1
+  },
+  "host": {
+    "run": "npm run host",
+    "what": "Starts a fresh VS Code development host on native Windows with a new temporary profile and synthetic source folders, drives the real webview, and fails on a missing, failed or incomplete result. Opens a VS Code window for about 40 seconds. Needs VS Code installed (or AGENTVIZ_VSCODE). Receipt: artifacts/host/extension-host-result.json. Does not cover Linux, VSCodium or a live AgentBoard caller.",
+    "minutes": 6
+  },
+  "browser": {
+    "run": "npm run browser",
+    "what": "Inspects the emitted UI in headless Edge or Chrome with real key presses at 1280, 600 and 360 px: focus, accessible names, contrast, example and real labels, console and policy errors. Uses a temporary browser profile and synthetic data. Receipt and screenshots: artifacts/browser/. Does not cover VS Code theme colours or the real clipboard.",
+    "minutes": 3
   },
   "package": {
     "run": "npm run package",
