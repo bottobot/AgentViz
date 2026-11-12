@@ -120,3 +120,187 @@ test('discovery finds both providers, sorts by writes, reports the list limit an
   assert.equal(absent.sessions.length, 0);
   assert.equal(absent.warnings.length, 2);
 });
+
+// S01 fixtures are synthetic. Shapes follow the locally observed key sets only:
+// Claude {type:'custom-title',customTitle,sessionId} and {type:'ai-title',aiTitle,sessionId};
+// Codex session_index.jsonl lines {id,thread_name,updated_at}.
+const CLAUDE_ID = '11111111-2222-4333-8444-555555555555';
+const CODEX_ID = '019a0000-aaaa-7bbb-8ccc-0123456789ab';
+const line = value => JSON.stringify(value) + '\n';
+const prompt = cwd => line({ type: 'user', timestamp: '2026-11-11T18:00:00Z', cwd, sessionId: CLAUDE_ID, message: { content: 'PRIVATE_PROMPT sk-PRIVATE_SECRET' } });
+const customTitle = text => line({ type: 'custom-title', customTitle: text, sessionId: CLAUDE_ID });
+const aiTitle = text => line({ type: 'ai-title', aiTitle: text, sessionId: CLAUDE_ID });
+const publicFields = session => { const { file, ...rest } = session; return rest; };
+
+async function roots(t) {
+  const folder = await temporary(t);
+  const claudeRoot = path.join(folder, 'claude');
+  const codexRoot = path.join(folder, 'codex');
+  const claudeDir = path.join(claudeRoot, 'projects', 'encoded-project');
+  const codexDir = path.join(codexRoot, 'sessions', '2026', '11', '11');
+  await fs.mkdir(claudeDir, { recursive: true });
+  await fs.mkdir(codexDir, { recursive: true });
+  return { folder, claudeRoot, codexRoot, claudeDir, codexDir, index: path.join(codexRoot, 'session_index.jsonl') };
+}
+const rollout = (dir, id = CODEX_ID) => path.join(dir, `rollout-2026-11-11T10-00-00-${id}.jsonl`);
+const codexMeta = (cwd, id = CODEX_ID) => line({ type: 'session_meta', timestamp: '2026-11-11T18:00:00Z', payload: { id, cwd, base_instructions: { text: 'PRIVATE_INSTRUCTIONS' } } });
+async function listing(folder) {
+  const out = [];
+  for (const entry of await fs.readdir(folder, { withFileTypes: true, recursive: true })) {
+    const file = path.join(entry.parentPath, entry.name);
+    const stat = await fs.stat(file);
+    out.push(`${path.relative(folder, file)}|${entry.isDirectory() ? 'dir' : `${stat.size}|${stat.mtimeMs}`}`);
+  }
+  return out.sort();
+}
+
+// SPEC: S01, custom titles take precedence over generated titles wherever they appear.
+test('Claude names prefer the latest custom title over generated titles and report their source', async (t) => {
+  const { claudeRoot, codexRoot, claudeDir } = await roots(t);
+  await fs.writeFile(path.join(claudeDir, `${CLAUDE_ID}.jsonl`), aiTitle('Generated first') + prompt('C:\\work\\Example') + customTitle('Chosen by hand') + record('one') + aiTitle('Generated later'));
+  await fs.writeFile(path.join(claudeDir, 'generated-only.jsonl'), prompt('C:\\work\\Example') + aiTitle('Generated first') + aiTitle('Generated latest'));
+  await fs.writeFile(path.join(claudeDir, 'untitled.jsonl'), prompt('C:\\work\\Example') + record('one'));
+  const { sessions } = await discoverSessions({ claudeRoot, codexRoot });
+  const by = id => sessions.find(session => session.sessionId === id);
+  assert.deepEqual([by(CLAUDE_ID).name, by(CLAUDE_ID).nameSource], ['Chosen by hand', 'custom']);
+  assert.deepEqual([by('generated-only').name, by('generated-only').nameSource], ['Generated latest', 'generated']);
+  assert.deepEqual([by('untitled').name, by('untitled').nameSource], ['Unnamed session', 'none']);
+  assert.equal(by(CLAUDE_ID).sessionId.length, 36);
+  assert.equal(by(CLAUDE_ID).project, 'Example');
+  assert.doesNotMatch(JSON.stringify(sessions.map(publicFields)), /PRIVATE_|C:\\\\work/);
+});
+
+// SPEC: S01, a rename appended after the header is found and keeps the source identity stable.
+test('a late Claude rename beyond the header preview replaces the name without changing identity', async (t) => {
+  const { claudeRoot, codexRoot, claudeDir } = await roots(t);
+  const file = path.join(claudeDir, `${CLAUDE_ID}.jsonl`);
+  const quoted = line({ type: 'user', timestamp: '2026-11-11T18:00:00Z', message: { content: '{"type":"custom-title","customTitle":"PRIVATE_QUOTED_TITLE"}' } });
+  const nested = line({ type: 'assistant', timestamp: '2026-11-11T18:00:00Z', message: { type: 'custom-title', customTitle: 'PRIVATE_NESTED_TITLE', content: [] } });
+  const huge = line({ type: 'custom-title', customTitle: 'PRIVATE_HUGE_TITLE', sessionId: CLAUDE_ID, padding: 'x'.repeat(300 * 1024) });
+  await fs.writeFile(file, prompt('C:\\work\\Example') + customTitle('Before rename') + longRecord('filler').repeat(12) + quoted + nested + huge);
+  const before = (await discoverSessions({ claudeRoot, codexRoot })).sessions[0];
+  assert.equal(before.name, 'Before rename');
+  const split = Buffer.from(customTitle('After r\u00e9name'));
+  const cut = split.indexOf(Buffer.from('\u00e9')) + 1;
+  await fs.appendFile(file, split.subarray(0, cut));
+  assert.equal((await discoverSessions({ claudeRoot, codexRoot })).sessions[0].name, 'Before rename');
+  await fs.appendFile(file, split.subarray(cut));
+  const after = (await discoverSessions({ claudeRoot, codexRoot })).sessions[0];
+  assert.deepEqual([after.name, after.nameSource], ['After r\u00e9name', 'custom']);
+  assert.deepEqual([after.id, after.sessionId, after.workspaceKey], [before.id, before.sessionId, before.workspaceKey]);
+  await fs.writeFile(file, prompt('C:\\work\\Example') + aiTitle('Rewritten'));
+  const rewritten = (await discoverSessions({ claudeRoot, codexRoot })).sessions[0];
+  assert.deepEqual([rewritten.name, rewritten.nameSource, rewritten.id], ['Rewritten', 'generated', before.id]);
+});
+
+// SPEC: S01, Codex names come only from the verified local session_index.jsonl shape.
+test('Codex names come from the latest matching session index line', async (t) => {
+  const { claudeRoot, codexRoot, codexDir, index } = await roots(t);
+  const other = '019a0000-aaaa-7bbb-8ccc-ffffffffffff';
+  await fs.writeFile(rollout(codexDir), codexMeta('C:/work/Example') + line({ type: 'event_msg', timestamp: '2026-11-11T18:00:01Z', payload: { type: 'user_message', message: 'PRIVATE_PROMPT' } }));
+  await fs.writeFile(rollout(codexDir, other), codexMeta('C:/work/Example', other));
+  await fs.writeFile(index, line({ id: CODEX_ID, thread_name: 'First name', updated_at: '2026-11-11T18:00:00Z' })
+    + line({ id: 'unrelated', thread_name: 'PRIVATE_OTHER_THREAD', updated_at: '2026-11-11T18:00:01Z' })
+    + '{not JSON}\n' + line({ id: CODEX_ID, thread_name: 7 }) + line(['array'])
+    + line({ id: CODEX_ID.toUpperCase(), thread_name: 'Renamed thread', updated_at: '2026-11-11T18:00:02Z' }));
+  let { sessions, warnings } = await discoverSessions({ claudeRoot, codexRoot });
+  const named = sessions.find(session => session.sessionId === CODEX_ID);
+  const unnamed = sessions.find(session => session.sessionId === other);
+  assert.deepEqual([named.name, named.nameSource, named.project], ['Renamed thread', 'index', 'Example']);
+  assert.deepEqual([unnamed.name, unnamed.nameSource], ['Unnamed session', 'none']);
+  assert.equal(named.workspaceKey, unnamed.workspaceKey);
+  assert.deepEqual(warnings, []);
+  assert.doesNotMatch(JSON.stringify(sessions.map(publicFields)), /PRIVATE_/);
+  await fs.appendFile(index, line({ id: CODEX_ID, thread_name: 'Renamed again', updated_at: '2026-11-11T18:00:03Z' }));
+  const again = (await discoverSessions({ claudeRoot, codexRoot })).sessions.find(session => session.sessionId === CODEX_ID);
+  assert.deepEqual([again.name, again.id], ['Renamed again', named.id]);
+});
+
+// SPEC: S01, absent or unreadable title metadata yields the literal fallback, never prompt text.
+test('missing and corrupt title metadata fall back to Unnamed session for both providers', async (t) => {
+  const { claudeRoot, codexRoot, claudeDir, codexDir, index } = await roots(t);
+  await fs.writeFile(path.join(claudeDir, 'corrupt.jsonl'), prompt('C:\\work\\Example')
+    + '{"type":"custom-title","customTitle":"PRIVATE_TRUNCATED\n'
+    + line({ type: 'custom-title', customTitle: { text: 'PRIVATE_OBJECT' } }) + line({ type: 'ai-title', aiTitle: 12 })
+    + line({ type: 'custom-title', customTitle: ' \u0000\n ' }) + line({ type: 'custom-title', title: 'PRIVATE_WRONG_KEY' }));
+  await fs.writeFile(path.join(claudeDir, 'no-cwd.jsonl'), customTitle('Has a name') + 'not json at all\n');
+  await fs.writeFile(rollout(codexDir), codexMeta('C:/work/Example'));
+  let { sessions, warnings } = await discoverSessions({ claudeRoot, codexRoot });
+  assert.deepEqual(warnings, []);
+  for (const id of ['corrupt', CODEX_ID]) {
+    const session = sessions.find(item => item.sessionId === id);
+    assert.deepEqual([session.name, session.nameSource], ['Unnamed session', 'none']);
+  }
+  const lost = sessions.find(item => item.sessionId === 'no-cwd');
+  assert.deepEqual([lost.name, lost.project, lost.workspaceKey, lost.workspaceLabel], ['Has a name', '', 'ws:unknown', 'Unknown workspace']);
+  await fs.writeFile(index, Buffer.from([0xff, 0xfe, 0x00, 0x7b, 0x0a, 0x7b, 0x22]));
+  ({ sessions, warnings } = await discoverSessions({ claudeRoot, codexRoot }));
+  assert.equal(sessions.find(item => item.sessionId === CODEX_ID).name, 'Unnamed session');
+  await fs.rm(index);
+  await fs.mkdir(index);
+  ({ sessions, warnings } = await discoverSessions({ claudeRoot, codexRoot }));
+  assert.equal(sessions.find(item => item.sessionId === CODEX_ID).name, 'Unnamed session');
+  assert.match(warnings.join(' '), /Codex session names could not be read/);
+  assert.doesNotMatch(JSON.stringify(sessions.map(publicFields)), /PRIVATE_/);
+});
+
+test('hostile title text is reduced to short control-free text for both providers', async (t) => {
+  const { claudeRoot, codexRoot, claudeDir, codexDir, index } = await roots(t);
+  const hostile = '<script>alert(1)</script>\u001b]0;x\u0007\r\n\u202E' + 'long '.repeat(100);
+  await fs.writeFile(path.join(claudeDir, `${CLAUDE_ID}.jsonl`), prompt('C:\\work\\Example') + customTitle(hostile));
+  await fs.writeFile(rollout(codexDir), codexMeta('C:/work/Example'));
+  await fs.writeFile(index, line({ id: CODEX_ID, thread_name: hostile, updated_at: '2026-11-11T18:00:00Z' }));
+  const { sessions } = await discoverSessions({ claudeRoot, codexRoot });
+  assert.equal(sessions.length, 2);
+  for (const session of sessions) {
+    assert.ok(session.name.startsWith('<script>alert(1)</script>'));
+    assert.ok([...session.name].length <= 80);
+    assert.doesNotMatch(session.name, /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/);
+  }
+});
+
+// SPEC: S01, different directories never collapse because their basenames match.
+test('workspaces group by recorded directory, with distinct labels for duplicate basenames', async (t) => {
+  const { claudeRoot, codexRoot, claudeDir, codexDir } = await roots(t);
+  const ids = ['a', 'b', 'c', 'd', 'e'].map(letter => `019a0000-aaaa-7bbb-8ccc-00000000000${letter}`);
+  await fs.writeFile(path.join(claudeDir, 'win-one.jsonl'), prompt('C:\\Work\\Alpha\\Example'));
+  await fs.writeFile(rollout(codexDir, ids[0]), codexMeta('c:/work/ALPHA/example/', ids[0]));
+  await fs.writeFile(path.join(claudeDir, 'win-two.jsonl'), prompt('D:\\Other\\Beta\\Example'));
+  await fs.writeFile(rollout(codexDir, ids[1]), codexMeta('/home/dev/Example', ids[1]));
+  await fs.writeFile(rollout(codexDir, ids[2]), codexMeta('/home/dev/example', ids[2]));
+  await fs.writeFile(rollout(codexDir, ids[3]), codexMeta('C:\\Work\\Alpha\\Example', ids[3]));
+  await fs.writeFile(rollout(codexDir, ids[4]), codexMeta('C:\\Solo\\Unique', ids[4]));
+  await fs.writeFile(path.join(claudeDir, 'same-tail.jsonl'), prompt('E:\\Work\\Alpha\\Example'));
+  const { sessions } = await discoverSessions({ claudeRoot, codexRoot });
+  const by = id => sessions.find(session => session.sessionId === id);
+  assert.equal(by('win-one').workspaceKey, by(ids[0]).workspaceKey);
+  assert.equal(by('win-one').workspaceKey, by(ids[3]).workspaceKey);
+  assert.equal(by('win-one').workspaceLabel, by(ids[0]).workspaceLabel);
+  const distinct = ['win-one', 'win-two', ids[1], ids[2], ids[4], 'same-tail'].map(by);
+  assert.equal(new Set(distinct.map(session => session.workspaceKey)).size, 6);
+  assert.equal(new Set(distinct.map(session => session.workspaceLabel.toLowerCase())).size, 6);
+  assert.equal(by(ids[4]).workspaceLabel, 'Unique');
+  for (const session of sessions) {
+    assert.match(session.workspaceKey, /^ws:[0-9a-f]{20}$/);
+    assert.ok(session.workspaceLabel.length <= 80);
+    assert.doesNotMatch(session.workspaceLabel, /^[a-z]:[\\/]|^\/home/i);
+    assert.match(session.project, /^example$|^Unique$/i);
+  }
+  const again = (await discoverSessions({ claudeRoot, codexRoot })).sessions;
+  assert.deepEqual(again.map(publicFields), sessions.map(publicFields));
+});
+
+// SPEC: S01, metadata lookup is read only.
+test('discovery leaves provider folders byte-for-byte untouched and creates no files', async (t) => {
+  const { folder, claudeRoot, codexRoot, claudeDir, codexDir, index } = await roots(t);
+  await fs.writeFile(path.join(claudeDir, `${CLAUDE_ID}.jsonl`), prompt('C:\\work\\Example') + customTitle('Named'));
+  await fs.writeFile(rollout(codexDir), codexMeta('C:/work/Example'));
+  await fs.writeFile(index, line({ id: CODEX_ID, thread_name: 'Named', updated_at: '2026-11-11T18:00:00Z' }));
+  await fs.writeFile(path.join(codexRoot, 'auth.json'), '{"token":"PRIVATE_SECRET"}');
+  const before = await listing(folder);
+  const result = await discoverSessions({ claudeRoot, codexRoot });
+  await discoverSessions({ claudeRoot, codexRoot });
+  assert.deepEqual(await listing(folder), before);
+  assert.equal(result.sessions.length, 2);
+  assert.doesNotMatch(JSON.stringify(result), /PRIVATE_/);
+});

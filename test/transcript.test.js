@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { createSession, applyRecord, describeTool, MAX_EVENTS } = require('../src/transcript');
+const { createSession, applyRecord, describeTool, sessionTitle, workspaceIdentity, MAX_EVENTS, UNNAMED_SESSION } = require('../src/transcript');
 
 const time = '2026-11-11T18:00:00.000Z';
 const codex = (payload, type = 'response_item') => ({ type, timestamp: time, payload });
@@ -88,4 +88,35 @@ test('bounded history discloses omissions and releases old call lookup entries',
   assert.equal(state.droppedEvents, 2);
   assert.equal(state.calls.size, MAX_EVENTS);
   assert.equal(state.events[0].id, '2');
+});
+
+// SPEC: S01, saved titles are short display text; a prompt is never a fallback.
+test('saved titles are trimmed to short single-line text and fall back to the literal unnamed label', () => {
+  assert.equal(UNNAMED_SESSION, 'Unnamed session');
+  assert.equal(sessionTitle('  Fix \u001b[31mthe\r\n\tparser\u0000  '), 'Fix [31mthe parser');
+  assert.equal(sessionTitle('safe\u202Eevil\u2066name\u200B\u009F'), 'safeevilname');
+  assert.equal(sessionTitle('<img src=x onerror=alert(1)>'), '<img src=x onerror=alert(1)>');
+  const long = sessionTitle('\u{1F600}'.repeat(200));
+  assert.equal([...long].length, 80);
+  assert.ok(long.endsWith('\u2026'));
+  assert.ok(!/[\ud800-\udbff]$/.test(long.slice(0, -1)));
+  for (const value of ['', ' \n\t ', null, undefined, 7, {}, ['title']]) assert.equal(sessionTitle(value), '');
+});
+
+// SPEC: S01, Windows paths may ignore case; a recorded Linux path keeps its case semantics.
+test('workspace identity folds Windows path case and separators but keeps POSIX paths exact', () => {
+  const windows = workspaceIdentity('C:\\Work\\Alpha\\Example');
+  assert.equal(workspaceIdentity('c:/work/ALPHA/example/').key, windows.key);
+  assert.equal(workspaceIdentity('C:\\Work\\\\Alpha\\Example\\').key, windows.key);
+  assert.notEqual(workspaceIdentity('D:\\Work\\Alpha\\Example').key, windows.key);
+  assert.deepEqual(windows.segments, ['C:', 'Work', 'Alpha', 'Example']);
+  assert.equal(workspaceIdentity('\\\\Server\\Share\\Example').key, workspaceIdentity('\\\\server\\share\\example').key);
+  const upper = workspaceIdentity('/home/dev/Example');
+  assert.notEqual(workspaceIdentity('/home/dev/example').key, upper.key);
+  assert.equal(workspaceIdentity('/home/dev/Example/').key, upper.key);
+  assert.notEqual(workspaceIdentity('/mnt/c/Work/Alpha/Example').key, windows.key);
+  assert.deepEqual(upper.segments, ['home', 'dev', 'Example']);
+  assert.match(windows.key, /^ws:[0-9a-f]{20}$/);
+  assert.doesNotMatch(JSON.stringify([windows.key, upper.key]), /work|alpha|example|home/i);
+  for (const value of ['', '   ', null, undefined, 4, {}]) assert.equal(workspaceIdentity(value), null);
 });

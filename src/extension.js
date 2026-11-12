@@ -5,6 +5,22 @@ const os = require('node:os');
 const path = require('node:path');
 const { TranscriptReader, discoverSessions } = require('./sessions');
 const { webviewHtml } = require('./webview');
+const { sessionTitle, workspaceIdentity, UNNAMED_SESSION } = require('./transcript');
+
+const NAME_SOURCES = ['custom', 'generated', 'index'];
+// The only catalogue fields the webview may receive. Titles and labels are cleaned again here so nothing a
+// discovery change adds later (paths, scan state, raw text) can cross this boundary by accident.
+function catalogueEntry({ id, sessionId, provider, project, child, modified, workspaceKey, workspaceLabel, name, nameSource }) {
+  const known = typeof workspaceKey === 'string' && /^ws:[0-9a-f]{20}$/.test(workspaceKey);
+  const title = sessionTitle(name);
+  return {
+    id, sessionId, provider, project, child, modified,
+    workspaceKey: known ? workspaceKey : 'ws:unknown',
+    workspaceLabel: (known && sessionTitle(workspaceLabel)) || 'Unknown workspace',
+    name: title || UNNAMED_SESSION,
+    nameSource: title && title !== UNNAMED_SESSION && NAME_SOURCES.includes(nameSource) ? nameSource : 'none'
+  };
+}
 
 let panel;
 
@@ -40,8 +56,10 @@ function activate(context) {
           if (selected && !catalog.sessions.some(session => session.id === selected.id)) catalog.sessions.push(selected);
           if (!selected) {
             const previousId = context.workspaceState.get('selectedSession');
+            // An open folder is matched by its directory, never by a basename that another directory may share.
+            const openWorkspaces = new Set((vscode.workspace.workspaceFolders || []).filter(folder => folder.uri?.scheme === 'file').map(folder => workspaceIdentity(folder.uri.fsPath)?.key));
             selected = catalog.sessions.find(session => session.id === previousId)
-              || catalog.sessions.find(session => vscode.workspace.workspaceFolders?.some(folder => folder.name === session.project))
+              || catalog.sessions.find(session => openWorkspaces.has(session.workspaceKey))
               || catalog.sessions[0];
           }
         }
@@ -56,7 +74,7 @@ function activate(context) {
         if (disposed || revision !== generation || selected !== selection) return;
         await current.webview.postMessage({
           type: 'state', selectedId: selected?.id || '', snapshot,
-          sessions: catalog.sessions.map(({ id, sessionId, provider, project, child, modified }) => ({ id, sessionId, provider, project, child, modified })), warnings
+          sessions: catalog.sessions.map(catalogueEntry), warnings
         });
       } catch (error) {
         if (!disposed) vscode.window.showErrorMessage(`AgentViz could not refresh (${error.code || 'unexpected error'}).`);

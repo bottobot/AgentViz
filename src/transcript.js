@@ -1,11 +1,35 @@
 'use strict';
 
+const { createHash } = require('node:crypto');
+
 // WARNING: retained history is bounded; droppedEvents is always shown in the view.
 const MAX_EVENTS = 10000;
 const shortName = value => typeof value === 'string' ? value.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 160) : '';
 const pathParts = value => typeof value === 'string' ? value.replace(/\\/g, '/').split('/').filter(part => part && !/^[a-z]:$/i.test(part)) : [];
 const fileName = value => shortName(pathParts(value).slice(-2).join('/'));
 const projectName = value => shortName(pathParts(value).at(-1));
+
+const UNNAMED_SESSION = 'Unnamed session';
+const TITLE_LENGTH = 80;
+
+// Saved provider titles are display metadata: one short line, no control or direction-override characters.
+// Markup characters stay as text; the view escapes them where it writes HTML.
+function sessionTitle(value) {
+  if (typeof value !== 'string') return '';
+  const characters = [...value.replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/g, '').replace(/[\x00-\x1f\x7f-\x9f\u2028\u2029]/g, ' ').replace(/\s+/g, ' ').trim()];
+  return characters.length > TITLE_LENGTH ? characters.slice(0, TITLE_LENGTH - 1).join('').trimEnd() + '\u2026' : characters.join('');
+}
+
+// Windows drive and UNC paths compare without case or separator differences. Any other path is treated as
+// POSIX and compared exactly, so a Linux directory recorded in a transcript keeps its case semantics.
+// The key is opaque; the absolute path and its segments stay in the extension host.
+function workspaceIdentity(cwd) {
+  if (typeof cwd !== 'string' || !cwd.trim()) return null;
+  const windows = /^[a-z]:(?:[\\/]|$)/i.test(cwd) || cwd.startsWith('\\\\');
+  const segments = (windows ? cwd.replace(/\\/g, '/') : cwd).split('/').filter(Boolean);
+  const normal = windows ? `win:${cwd.startsWith('\\\\') ? '//' : ''}${segments.join('/').toLowerCase()}` : `posix:/${segments.join('/')}`;
+  return { key: `ws:${createHash('sha256').update(normal).digest('hex').slice(0, 20)}`, segments, windows };
+}
 
 function describeTool(name, input) {
   const tool = shortName(name).split(/__|\./).at(-1) || 'Tool';
@@ -156,4 +180,4 @@ function applyRecord(state, record) {
   }
 }
 
-module.exports = { createSession, applyRecord, describeTool, projectName, MAX_EVENTS };
+module.exports = { createSession, applyRecord, describeTool, projectName, sessionTitle, workspaceIdentity, MAX_EVENTS, UNNAMED_SESSION };
