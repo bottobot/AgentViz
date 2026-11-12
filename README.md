@@ -4,7 +4,7 @@ A live picture of local Claude Code and Codex sessions in a separate VS Code edi
 
 Find a session by project, then saved name, then ID. Follow it through a stations map, agent lanes, task list progress, a file footprint and an activity strip. An example session lets you explore the view without showing real activity.
 
-A parallel version of the plan that built these features is also in AgentBoard's **Run a Plan** list as **AgentViz: parallel find and follow sessions**, from `workflows/agentviz-next.parallel.plan.json`. `ORCHESTRATION.md` supplies the product brief, and `docs/development/agentviz-next-parallel-run.md` tracks its prepared, not launched state.
+A parallel version of the plan that built these features is also in AgentBoard's **Run a Plan** list as **AgentViz: parallel find and follow sessions**. `ORCHESTRATION.md` supplies the product brief, and `docs/development/agentviz-next-parallel-run.md` tracks its prepared, not launched state.
 
 Status: a local development build, verified on Windows 11 with desktop VS Code. It is not published. Linux and VSCodium are not verified. See [Limits](#limits).
 
