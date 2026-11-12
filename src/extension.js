@@ -3,7 +3,7 @@
 const vscode = require('vscode');
 const os = require('node:os');
 const path = require('node:path');
-const { TranscriptReader, discoverSessions } = require('./sessions');
+const { FamilyReader, discoverSessions } = require('./sessions');
 const { webviewHtml } = require('./webview');
 const { sessionTitle, workspaceIdentity, UNNAMED_SESSION } = require('./transcript');
 
@@ -49,6 +49,8 @@ function activate(context) {
     let catalog = emptyCatalog();
     // Every session of the current source by catalogue ID, not only the ones sent to the view.
     let index = new Map();
+    // The same sessions as a list, host only: the family reader looks for subagent transcripts in it.
+    let sourceFiles = [];
     let query = cleanQuery();
     let selected;
     let reader;
@@ -95,6 +97,7 @@ function activate(context) {
           }
           catalog = { ...emptyCatalog(), ...discovered };
           index = new Map(all.map(session => [session.id, session]));
+          sourceFiles = all;
           if (listingDue) lastWalk = Date.now();
           // The followed session is looked up by its stable ID. It is never replaced by a neighbour: a transcript
           // that has left the source stays named and is reported as missing.
@@ -106,8 +109,10 @@ function activate(context) {
         const selection = selected;
         if (selection?.missing) warnings.push('The followed session is no longer in the source folders (deleted or moved). Choose another session.');
         else if (selection) {
-          if (!reader) reader = new TranscriptReader(selection.provider, selection.sessionId);
-          try { snapshot = await reader.read(selection.file); }
+          // One reader per followed session: it reads that session and the subagent transcripts that belong to it.
+          // Choosing another session, Refresh or a new source drops it, and with it every child reader.
+          if (!reader) reader = new FamilyReader(selection.provider, selection.sessionId);
+          try { snapshot = await reader.read(selection.file, { files: sourceFiles }); }
           catch (error) { warnings.push(`Selected transcript could not be read (${error.code || 'unknown error'}). Choose another session or refresh.`); }
         }
         if (disposed || revision !== generation || selected !== selection) return;
@@ -164,6 +169,7 @@ function activate(context) {
       generation++;
       catalog = emptyCatalog();
       index = new Map();
+      sourceFiles = [];
       selected = undefined;
       reader = null;
       lastWalk = 0;

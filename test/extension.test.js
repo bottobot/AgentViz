@@ -6,11 +6,12 @@ const vm = require('node:vm');
 const { createSession } = require('../src/transcript');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function host(discoverSessions, workspaceFolders, savedSelection) {
+function host(discoverSessions, workspaceFolders, savedSelection, family) {
   const callbacks = {};
   const messages = [];
   const reads = [];
   const readers = [];
+  const contexts = [];
   let root = 'old-root';
   let stopped = false;
   const disposable = { dispose() {} };
@@ -33,9 +34,10 @@ function host(discoverSessions, workspaceFolders, savedSelection) {
   const module = { exports: {} };
   const sandbox = { module, exports: module.exports, require: name => {
     if (name === 'vscode') return vscode;
-    if (name === './sessions') return { discoverSessions, TranscriptReader: class {
+    // S04: the host follows a session through FamilyReader and hands it the host-only list of source files.
+    if (name === './sessions') return { discoverSessions, FamilyReader: class {
       constructor(provider, id) { readers.push(id); }
-      async read(file) { reads.push(file); return createSession('claude', 'synthetic'); }
+      async read(file, context) { reads.push(file); contexts.push(context); return family ? family(file, context) : createSession('claude', 'synthetic'); }
     } };
     if (name === './webview') return require('../src/webview');
     if (name === './transcript') return require('../src/transcript');
@@ -44,7 +46,7 @@ function host(discoverSessions, workspaceFolders, savedSelection) {
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../src/extension.js'), 'utf8'), sandbox);
   module.exports.activate({ extensionUri: 'extension:', subscriptions: [], workspaceState: { get() { return savedSelection; }, async update() {} } });
   callbacks.open();
-  return { callbacks, messages, reads, readers, stopped: () => stopped, setRoot(value) { root = value; callbacks.config({ affectsConfiguration: () => true }); } };
+  return { callbacks, messages, reads, readers, contexts, stopped: () => stopped, setRoot(value) { root = value; callbacks.config({ affectsConfiguration: () => true }); } };
 }
 
 const catalog = root => ({ sessions: [{ id: root, sessionId: 'synthetic', provider: 'claude', project: 'Example', file: `${root}/session.jsonl`, modified: 1 }], warnings: [] });
@@ -269,6 +271,44 @@ test('an older session can be followed by ID and stays followed through rename, 
   assert.equal(instance.reads.length, reads + 1);
   assert.doesNotMatch(JSON.stringify(instance.messages), /PRIVATE_|\.jsonl/);
   instance.callbacks.dispose();
+});
+
+// SPEC: S04, the host follows one family per selection and forwards its lanes without source metadata.
+test('the host gives the family reader the source list, forwards lanes, and starts a new reader on a new selection', async () => {
+  const first = listed('claude:first');
+  const second = listed('claude:second');
+  const child = listed('claude:child', { child: true, parentId: 'PRIVATE_PARENT' });
+  const all = [first, second, child];
+  const instance = host(() => Promise.resolve(answer([first, second], all)), undefined, undefined, (file, context) => ({
+    ...createSession('claude', 'synthetic'),
+    family: { lanes: [{ key: 'main', depth: 0 }, { key: 'agent-1', depth: 1, label: 'Explore', events: [], listed: context.files.length }], found: 1, limit: 24, eventLimit: 2000, notes: [] }
+  }));
+  instance.callbacks.message({ type: 'ready' });
+  await flush();
+  assert.equal(instance.contexts.at(-1).files, all, 'the host-only list of every source transcript, not the returned page');
+  let message = instance.messages.at(-1);
+  assert.deepEqual(message.snapshot.family.lanes.map(lane => [lane.key, lane.depth]), [['main', 0], ['agent-1', 1]]);
+  assert.equal(message.snapshot.family.lanes[1].listed, 3);
+  assert.deepEqual(instance.readers, ['claude:first-full-id']);
+  instance.callbacks.tick();
+  await flush();
+  assert.deepEqual(instance.readers, ['claude:first-full-id'], 'an ordinary refresh keeps the same family reader');
+
+  // Another selection: a new reader, and the first family's transcript is not read again.
+  instance.callbacks.message({ type: 'select', id: 'claude:second' });
+  await flush();
+  instance.callbacks.tick();
+  await flush();
+  assert.deepEqual(instance.readers, ['claude:first-full-id', 'claude:second-full-id']);
+  const reads = instance.reads.length;
+  assert.ok(instance.reads.slice(instance.reads.lastIndexOf('C:/PRIVATE_PATH/claude:first.jsonl') + 1).every(file => file === 'C:/PRIVATE_PATH/claude:second.jsonl'));
+  assert.doesNotMatch(JSON.stringify(instance.messages), /PRIVATE_|\.jsonl|parentId/);
+
+  // Disposal stops every read, so no child reader outlives the panel.
+  instance.callbacks.dispose();
+  instance.callbacks.tick();
+  await flush();
+  assert.equal(instance.reads.length, reads);
 });
 
 test('a saved selection older than the returned list is restored and its own name is read', async () => {

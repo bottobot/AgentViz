@@ -66,14 +66,55 @@ function describeTool(name, input) {
 }
 
 function createSession(provider, id) {
-  const state = { provider, id, project: '', parent: null, events: [], status: 'unknown', context: null, updatedAt: 0, invalidLines: 0, oversizedLines: 0, droppedEvents: 0 };
+  const state = { provider, id, project: '', parent: null, events: [], status: 'unknown', context: null, updatedAt: 0, startedAt: 0, invalidLines: 0, oversizedLines: 0, droppedEvents: 0 };
   Object.defineProperties(state, {
     calls: { value: new Map() },
     markers: { value: new Set() },
     turn: { value: null, writable: true },
-    capacity: { value: null, writable: true }
+    capacity: { value: null, writable: true },
+    // Host only (S04): what this transcript records about agents it started. Never sent to the view as is.
+    // spawns: by the parent's call ID; agents: by child agent ID; notices: the first end report per child agent ID.
+    lifecycle: { value: { spawns: new Map(), agents: new Map(), notices: new Map() } },
+    agentLabel: { value: '', writable: true }
   });
   return state;
+}
+
+// WARNING: bounded host memory; the oldest lifecycle entry is forgotten past this many per transcript.
+const LIFECYCLE_LIMIT = 5000;
+function remember(map, key, value) {
+  if (map.has(key)) return;
+  map.set(key, value);
+  if (map.size > LIFECYCLE_LIMIT) map.delete(map.keys().next().value);
+}
+const agentKey = value => typeof value === 'string' && /^[\w-]{1,80}$/.test(value) ? value : '';
+
+// Verified local shape (2026-11-12): Claude reports the end of a background agent to its parent as text starting
+// with <task-notification>, holding <task-id> (the child agent ID) and <status> before <summary>. The same notice
+// repeats in queue-operation, attachment and user records; the first one seen is kept. Only the ID and the status
+// word are read. Returns true when the text is such a notice, so it is not mistaken for a user prompt.
+function taskNotice(state, time, text) {
+  if (typeof text !== 'string') return false;
+  const head = text.slice(0, 4096).trimStart();
+  if (!head.startsWith('<task-notification>')) return false;
+  const summary = head.indexOf('<summary>');
+  const fields = summary === -1 ? head : head.slice(0, summary);
+  const id = fields.match(/<task-id>([\w-]{1,80})<\/task-id>/)?.[1];
+  const status = fields.match(/<status>([a-z_]{1,24})<\/status>/)?.[1];
+  if (id && status) remember(state.lifecycle.notices, id, { time, status });
+  return true;
+}
+
+// Verified local shape (2026-11-12): the user record answering an Agent call carries toolUseResult
+// { agentId, status: 'async_launched' | 'completed', ... }; a failed call has is_error and no agent ID.
+function spawnResult(state, time, part, result) {
+  const call = state.calls.get(part.tool_use_id);
+  const agent = result && typeof result === 'object' ? agentKey(result.agentId) : '';
+  if (!agent && call?.kind !== 'agents') return;
+  const failed = part.is_error === true;
+  const entry = { launched: call ? call.time : time, reported: time, ended: failed || result?.status === 'completed', failed };
+  if (typeof part.tool_use_id === 'string') remember(state.lifecycle.spawns, part.tool_use_id, entry);
+  if (agent) remember(state.lifecycle.agents, agent, entry);
 }
 
 function push(state, event) {
@@ -118,10 +159,17 @@ function applyRecord(state, record) {
   if (!record || typeof record !== 'object') return;
   const time = typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : NaN;
   const validTime = Number.isFinite(time);
-  if (validTime) state.updatedAt = Math.max(state.updatedAt, time);
+  if (validTime) {
+    state.updatedAt = Math.max(state.updatedAt, time);
+    if (!state.startedAt || time < state.startedAt) state.startedAt = time;
+  }
   if (state.provider === 'claude') {
     if (typeof record.cwd === 'string') state.project = projectName(record.cwd);
+    // A subagent transcript names itself and the session it belongs to on its own records.
+    if (!state.parent && record.agentId === state.id && typeof record.sessionId === 'string' && record.sessionId !== state.id) state.parent = shortName(record.sessionId);
     if (!validTime) return;
+    if (record.type === 'queue-operation') { taskNotice(state, time, record.content); return; }
+    if (record.type === 'attachment') { if (record.attachment?.type === 'queued_command') taskNotice(state, time, record.attachment.prompt); return; }
     const content = Array.isArray(record.message?.content) ? record.message.content : [];
     if (record.type === 'assistant') {
       for (const part of content) if (part?.type === 'tool_use') startTool(state, time, part.id, part.name, part.input);
@@ -130,8 +178,15 @@ function applyRecord(state, record) {
         marker(state, time, 'complete', record.uuid, 'Turn complete');
       }
     } else if (record.type === 'user') {
-      for (const part of content) if (part?.type === 'tool_result') finishTool(state, part.tool_use_id, part.is_error === true);
-      if ((typeof record.message?.content === 'string' || content.some(part => part?.type === 'text')) && !content.some(part => part?.type === 'tool_result')) {
+      const results = content.filter(part => part?.type === 'tool_result');
+      for (const part of results) {
+        finishTool(state, part.tool_use_id, part.is_error === true);
+        spawnResult(state, time, part, results.length === 1 ? record.toolUseResult : null);
+      }
+      const text = typeof record.message?.content === 'string' ? record.message.content : content.find(part => part?.type === 'text')?.text;
+      // An end report delivered as a user record is a lifecycle event, not something the user typed.
+      if (taskNotice(state, time, text)) return;
+      if ((typeof record.message?.content === 'string' || content.some(part => part?.type === 'text')) && !results.length) {
         marker(state, time, 'prompt', record.uuid, 'User prompt');
         state.status = 'active';
       }
@@ -144,11 +199,20 @@ function applyRecord(state, record) {
   if (record.type === 'session_meta') {
     if (typeof payload.id === 'string' && payload.id !== state.id) return;
     if (typeof payload.cwd === 'string') state.project = projectName(payload.cwd);
-    const parent = payload.source?.subagent?.thread_spawn?.parent_thread_id;
-    if (typeof parent === 'string') state.parent = shortName(parent);
+    const spawn = payload.source?.subagent?.thread_spawn;
+    if (typeof spawn?.parent_thread_id === 'string') state.parent = shortName(spawn.parent_thread_id);
+    // Verified local shape (2026-11-12): a child rollout stores a short generated nickname and an optional role.
+    state.agentLabel = sessionTitle(typeof spawn?.agent_role === 'string' && spawn.agent_role ? spawn.agent_role : spawn?.agent_nickname).slice(0, 40);
     return;
   }
   if (!validTime) return;
+  // Verified local shape (2026-11-12): rare parent-side record { agent_thread_id, kind: 'started' | 'interacted' }.
+  // It proves the child existed; Codex parents do not record when a child ends.
+  if (record.type === 'event_msg' && payload.type === 'sub_agent_activity') {
+    const agent = agentKey(payload.agent_thread_id);
+    if (agent) remember(state.lifecycle.agents, agent.toLowerCase(), { launched: time, reported: time, ended: false, failed: false });
+    return;
+  }
   if (record.type === 'response_item') {
     if (payload.type === 'function_call' || payload.type === 'custom_tool_call') {
       let input = payload.input;
@@ -180,4 +244,4 @@ function applyRecord(state, record) {
   }
 }
 
-module.exports = { createSession, applyRecord, describeTool, projectName, sessionTitle, workspaceIdentity, MAX_EVENTS, UNNAMED_SESSION };
+module.exports = { createSession, applyRecord, describeTool, projectName, sessionTitle, workspaceIdentity, MAX_EVENTS, LIFECYCLE_LIMIT, UNNAMED_SESSION };

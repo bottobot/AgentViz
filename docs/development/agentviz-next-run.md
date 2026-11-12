@@ -9,7 +9,7 @@ The executable schedule is `workflows/agentviz-next.plan.json`, named **AgentViz
 | S01 workspace and saved names | Implemented, awaiting board review | 8a7300 (plan card a40b39) | `0808321` | `npm test` 31/31, `npm run check` exit 0; see S01 below |
 | S02 navigation filters | Implemented, awaiting board review | 153bc7 (plan card a40b39) | `14273a5` | `npm test` 50/50, `npm run check` exit 0, headless Edge 17/17; see S02 below |
 | S03 complete catalogue lookup | Implemented, awaiting board review | 6e5778 (plan card a40b39) | `6977d3e` | `npm test` 63/63, `npm run check` exit 0; see S03 below |
-| S04 agent lanes | Pending | Not allocated | None | Not run |
+| S04 agent lanes | Implemented, awaiting board review | c15df0 (plan card a40b39) | See `git log` on `task/c15df0` (commit titled "feat: show main and subagent lanes (S04)") | `npm test` 71/71, `npm run check` exit 0, local sample 24 families; see S04 below |
 | S05 explicit task progress | Pending | Not allocated | None | Not run |
 | S06 file footprint | Pending | Not allocated | None | Not run |
 | S07 AgentBoard entry command | Pending | Not allocated | None | Not run |
@@ -199,4 +199,109 @@ Regressions added (13).
 - Subagent transcripts are read for names although none had a title in the S01 sample. Skipping them would roughly halve the cold name search; not done, because the sample is not proof.
 - Linux and VSCodium were not run.
 
-Next action: board review of `task/6e5778`, then S04.
+Next action at the end of S03: board review of `task/6e5778`, then S04 (now done, below).
+
+## S04: Show main and subagent lanes
+
+Owner: card `c15df0`, branch `task/c15df0`, AgentBoard worktree. Dependency commit: `95e5ca1` (S03 integrated). Code commit: the commit on this branch titled "feat: show main and subagent lanes (S04)". Review and integration: pending, done by the board.
+
+### Observed source mapping (2026-11-12, native Windows, keys and counts only)
+
+No ID, label, path, prompt or payload value was printed or saved. The probe scripts were temporary and are not committed.
+
+| Provider | Fact | Source | Counts behind it |
+| --- | --- | --- | --- |
+| Claude | Child transcript location | `<project>/<sessionId>/subagents/agent-<agentId>.jsonl`, and `subagents/workflows/<run>/agent-<agentId>.jsonl` for workflow agents | 1,218 plain and 384 workflow files |
+| Claude | Child names its session and itself | every child record has `sessionId` (the parent session) and `agentId` (equal to the file name) | 148 of 150 newest children; 2 had no records |
+| Claude | Link record | `agent-<agentId>.meta.json`: `agentType`, `toolUseId`, `parentAgentId`, `finished`, `spawnDepth` (plus `description`, never read out) | present for 341 of 341 children in 40 sessions |
+| Claude | Parent's spawn | `Agent` tool call; its result record has `toolUseResult.agentId` and `status` `async_launched` or `completed` | 242 of 242 `meta.toolUseId` values matched a main-transcript call and the same agent ID |
+| Claude | Nested child | `meta.parentAgentId` names another child; `meta.toolUseId` is a call in that child's transcript | 8 of 8 |
+| Claude | End of a background agent | text starting `<task-notification>` with `<task-id>` and `<status>` (`completed`, `failed`, `stopped`), repeated in `queue-operation`, `attachment` and `user` records | 244 of 256 background agents had at least two copies; 12 had none |
+| Claude | End of a waited-for agent | the result record itself: `status: completed`, or `is_error` with no agent ID | 10 completed, 7 failed |
+| Claude | Workflow agents | no `toolUseId` and no agent ID in the main transcript | 90 of 90 |
+| Codex | Child names its parent | `session_meta.payload.source.subagent.thread_spawn.parent_thread_id` in the child's first record; also `depth`, `agent_nickname`, `agent_role` | 54 children in 200 rollouts, 7 at depth 2; every parent rollout was found by ID |
+| Codex | Forked child | `forked_from_id` equals the parent; 22 of 45 repeat the parent's `session_meta`; copied calls keep the parent's call IDs | 47 of 56 sampled lanes held copied calls |
+| Codex | Parent's spawn | `spawn_agent` call whose output is `{task_name}`: no child thread ID | 145 of 146 |
+| Codex | Parent's record of a child | `event_msg.sub_agent_activity {agent_thread_id, kind}`, rare | 15 records |
+| Codex | End of a child | **not recorded by the parent.** The child's own `task_complete` / `turn_aborted` are turn ends | 439 started, 396 complete, 52 aborted in children |
+
+### What changed
+
+- `src/transcript.js`: each transcript keeps a host-only `lifecycle` (spawns by call ID, agents by agent ID, the first end notice per agent), `startedAt`, and for children `parent`. A task notification delivered as a user record is no longer counted as a user prompt.
+- `src/sessions.js`: `FamilyReader` (same constructor and `read` as `TranscriptReader`). It reads the followed session, finds its subagent transcripts in the existing folder listing, reads each incrementally and returns the session state plus `family: { lanes, found, limit, eventLimit, notes }`. Discovery marks Codex children and workflow agents as `child`. `TranscriptReader.read` takes an optional byte limit.
+- `src/extension.js`: one `FamilyReader` per followed session, given the host-only list of source files. Nothing else changed in the host; the catalogue whitelist is untouched.
+- `media/view.js`: `familyLanes`, `familyEvents`, `laneCounts`, `laneFacts`, `laneAxis` and an "Agent lanes" panel between the stations and the strip. The example session has a synthetic family.
+- `media/style.css`: lane rows, indent by depth, end marks, narrow layout. No inline styles; the CSP is unchanged.
+- `media/app.js` and `src/webview.js` were not touched.
+
+### Behaviour
+
+- **Counting rule (one definition everywhere).** The family is the followed session plus the subagent lanes loaded for it. Stations, the two totals, the recent list, the lanes and the strip all cover that family. Each call counts once, in the lane of the agent that made it. Starting a subagent is a call in the parent's lane, never in the child's. The headings and footer state the scope ("MAIN + 3 SUBAGENT LANES" or "FOLLOWED SESSION ONLY").
+- **Links are only what is recorded.** Claude: folder location plus the child's own `sessionId`, then `meta.parentAgentId` for nesting. Codex: the child's own `parent_thread_id`. A child whose records name another session is left out and counted in a note.
+- **One time axis.** From the first to the last time any lane recorded. Main first, children under their parent in order of first record, indented by depth.
+- **Boundaries.** Start is the child's first record, or "Launch recorded by parent" when there is no child transcript. End is a parent-recorded report with its time ("Completed/Failed/Stopped … (reported to parent)"). `finished` without a time reads "Marked finished; end time not recorded". Otherwise "No end recorded" with the last record time. A duration is shown only between two recorded times. A dashed end mark means "last record", a solid one a recorded end.
+- **Deduplication.** Repeated spawn results and repeated end notices change nothing; the first notice wins. A call ID the parent also holds (forked history) is not counted in the child; the lane says how many were left out. A repeated lane key is drawn once.
+- **Cycles and missing parents.** Parent walks stop at a repeat or an unknown parent. Such lanes go under the followed session and say "Parent lane not loaded". A Codex loop terminates through a visited set.
+- **Missing child files.** A child the parent recorded with no transcript gets a lane saying "Transcript not found (deleted, moved or not written yet)", with the parent's launch time and no calls.
+- **Following a subagent.** Its own descendants are shown; a note says its parent and siblings are not.
+- **Selection and cleanup.** A new selection, Refresh or a source change drops the reader and all its child readers. Children that leave the listing are dropped. No file handle is held between reads. An unchanged, fully read child is not reopened (one `stat` per child per pass).
+- A child's task text arrives as a "Task received" marker, not a prompt.
+
+### Disclosed limits
+
+- 24 subagent lanes, most recently written first; the note gives "N of M" and says totals cover the lanes shown.
+- 2,000 newest events per subagent lane; omitted counts are shown per lane and in the notice.
+- 200 newest Claude subagent link records checked per listing; 64 KB per link record.
+- 24 MB of subagent transcript read per pass; lanes still loading say "Loading history".
+- Membership is recomputed per folder listing (every 10 s), so a new child appears up to 10 s late and can briefly show as "not found".
+- Copied-call detection uses the parent's retained calls (latest 10,000 events).
+
+### Checks (worktree, PowerShell 7, Node v26.7.0)
+
+| Command | Result |
+| --- | --- |
+| `npm test` with the new and changed tests on the previous sources (`95e5ca1`, extracted with `git archive`) | 71 tests, 55 pass, 16 fail: the 8 new S04 tests, plus the 8 existing host tests, whose test double now provides `FamilyReader` |
+| `npm test` on this branch | exit 0: 71 tests, 71 pass, 0 fail |
+| `npm run check` on this branch | exit 0 |
+| Local compatibility sample (temporary script, real roots, read-only, real `FamilyReader` and view) | exit 0; see below |
+
+Regressions added (8). `test/family.test.js` (7): parent lifecycle capture with repeated metadata, failure and notice-is-not-a-prompt; a Claude family with nested, overlapping, workflow and missing children, attribution, lifecycle, one counting rule and privacy sentinels; repeated reads, reopen cost and appended child work; missing files, cycles, unknown parents, foreign transcripts and a deleted child; selection change, a followed subagent and the lane limit; a Codex family with a forked child, nesting, a missing child and a parent loop; lane facts, the shared axis, hostile labels and the single-lane state. `test/extension.test.js` (1): the host passes the source list, forwards lanes, starts a new reader on selection and stops on disposal.
+
+### Local compatibility sample (2026-11-12, counts only)
+
+3,621 transcripts listed. The 12 newest families of each provider were read to the end with the real reader and drawn with the real view.
+
+| | Claude | Codex |
+| --- | --- | --- |
+| Families / child lanes | 12 / 94 | 12 / 56 |
+| Station total equals sum of lanes, no call ID in two lanes | 12 of 12 | 12 of 12 |
+| Snapshots containing a path-like string | 0 | 0 |
+| Lanes with a recorded end and time | 80 (79 completed, 1 failed) | 0 (parents do not record one) |
+| Lanes with no recorded end | 14 | 56 |
+| Lanes linked by a parent's spawn record / by the child's own records only | 89 / 5 | 3 / 53 |
+| Lanes with calls copied from the parent, not counted | 2 | 47 |
+| Nested lanes (depth 2) | 0 in this sample | 7 |
+| Slowest first load / unchanged re-read | 1.2 s / 69 ms | 59 s / 1.5 s (see gaps) |
+
+One Claude family exceeded the lane limit and one had parent-recorded children without transcripts; both notes appeared.
+
+### Evidence
+
+- `artifacts/s04/` in this worktree (git-ignored, local only): `lanes-synthetic.html` and `lanes-synthetic-desktop.png` (the synthetic example family drawn by the real view and stylesheet, headless Edge, 1280 px), `lanes-synthetic.txt` (lane facts and the three equal totals), `local-compatibility-sample.txt` (the counts above).
+- Tests and synthetic fixtures are in `test/family.test.js`.
+
+### Gaps and limits
+
+- **Not run in a VS Code host.** The panel was drawn in headless Edge from static HTML only. The narrow screenshot was not captured; the narrow rule is in the stylesheet and untested in a browser. S09 owns host acceptance.
+- **Codex ends are unavailable.** Every Codex lane reads "No end recorded", with its own last turn state when it has one.
+- **Background Claude agents with no notice** (12 of 256) and all workflow agents show no end, or "Marked finished; end time not recorded".
+- **Large Codex families load slowly.** The slowest took 59 s to load fully (8 MB per transcript and 24 MB of children per pass) and its "unchanged" re-read was 1.5 s because it was still loading after 40 passes. Activity updates pause during each pass. S08 owns cost.
+- Nested Claude lanes were verified on 8 real link records in the probe and on synthetic data, but none fell in the 12-family sample.
+- A lane beyond the 24-lane limit is not read, so its calls are in no total. The note says so.
+- A forked child of a parent with more than 10,000 retained events can count copied calls older than that.
+- Copied prompts in a forked Codex child appear as "Task received" markers. Markers are not counted as calls.
+- `agentType` (Claude) and the Codex nickname or role are shown as lane labels, cleaned and cut to 40 characters. They are stored provider metadata, not prompts; `description` and `agent_path` are never read out.
+- The status pill still describes the followed session's own turn; "Quiet" now uses the latest record of any lane.
+- Contrast and screen reader output were not measured. Linux and VSCodium were not run.
+
+Next action: board review of `task/c15df0`, then S05.

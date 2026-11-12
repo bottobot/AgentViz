@@ -60,7 +60,8 @@ class TranscriptReader {
     }
   }
 
-  async read(file) {
+  // `limit` caps the bytes read by this call; the rest is read on later calls and `loading` says so.
+  async read(file, limit = READ_BUDGET) {
     const handle = await fs.open(file, 'r');
     try {
       const stat = await handle.stat();
@@ -75,7 +76,7 @@ class TranscriptReader {
       }
       this.identity = identity;
       this.mtime = stat.mtimeMs;
-      const target = Math.min(stat.size, this.offset + READ_BUDGET);
+      const target = Math.min(stat.size, this.offset + Math.max(0, Math.min(READ_BUDGET, limit)));
       const buffer = Buffer.alloc(Math.min(CHUNK, target - this.offset));
       while (this.offset < target) {
         const { bytesRead } = await handle.read(buffer, 0, Math.min(buffer.length, target - this.offset), this.offset);
@@ -93,11 +94,242 @@ class TranscriptReader {
   }
 }
 
+// WARNING: disclosed family limits (S04); each one is reported in the view when it is reached.
+const FAMILY_LIMIT = 24;                      // subagent lanes followed at once, most recently written first
+const FAMILY_POOL = 200;                      // newest Claude subagent transcripts whose link records are checked
+const LANE_EVENTS = 2000;                     // newest events sent per subagent lane
+const FAMILY_READ_BUDGET = 24 * 1024 * 1024;  // subagent transcript bytes read per pass
+const META_LIMIT = 64 * 1024;
+const ROOT_LANE = 'main';
+const END_STATES = { completed: 'completed', failed: 'failed', stopped: 'stopped', killed: 'stopped' };
+const agentKey = value => typeof value === 'string' && /^[\w-]{1,80}$/.test(value) ? value : '';
+
+// Follows one selected session and the subagent transcripts that verifiably belong to it (S04).
+// Source mapping, verified on local data 2026-11-12:
+//   Claude: children are <session>/subagents/**/agent-<agentId>.jsonl. Each child record carries the session ID
+//     and its own agent ID. agent-<agentId>.meta.json holds agentType, toolUseId (the parent's Agent call),
+//     parentAgentId (set when another subagent started it) and finished. The parent's result record holds
+//     toolUseResult.agentId; background agents end with a task notification in the parent transcript.
+//   Codex: a child rollout names its parent in session_meta.payload.source.subagent.thread_spawn.parent_thread_id.
+//     The parent records no child thread ID at spawn and no end, so a Codex lane has no parent-reported end.
+// A lane holds only what the child's own transcript recorded. The parent's spawn call stays in the parent's lane.
+// Same constructor and read(file) as TranscriptReader; the result is the selected session's state plus `family`.
+class FamilyReader {
+  constructor(provider, id) {
+    this.provider = provider;
+    this.id = id;
+    this.main = new TranscriptReader(provider, id);
+    this.children = new Map();
+    this.metas = new Map();
+    this.listing = null;
+    this.planFile = '';
+    this.plan = null;
+  }
+
+  async meta(session) {
+    const known = this.metas.get(session.file);
+    if (known?.finished) return known;
+    let meta = { type: '', call: '', parent: '', finished: false };
+    let handle;
+    try {
+      handle = await fs.open(session.file.replace(/\.jsonl$/, '.meta.json'), 'r');
+      const buffer = Buffer.alloc(META_LIMIT);
+      const { bytesRead } = await handle.read(buffer, 0, META_LIMIT, 0);
+      const value = JSON.parse(buffer.subarray(0, bytesRead).toString('utf8'));
+      // Only these four fields are kept. The description beside them is task text and is never read out.
+      if (value && typeof value === 'object') meta = { type: [...sessionTitle(value.agentType)].slice(0, 40).join(''), call: typeof value.toolUseId === 'string' ? value.toolUseId : '', parent: agentKey(value.parentAgentId), finished: value.finished === true };
+    } catch { /* A missing or half-written link record leaves the child linked by its own records only. */ }
+    finally { if (handle) await handle.close(); }
+    this.metas.set(session.file, meta);
+    return meta;
+  }
+
+  // Which transcripts of the current listing belong to the selected session, and under which parent.
+  async members(file, files) {
+    const members = [];
+    const ids = new Set();
+    let found = 0;
+    let unchecked = 0;
+    let rootIsChild = false;
+    if (this.provider === 'claude') {
+      const marker = `${path.sep}subagents${path.sep}`;
+      const at = file.lastIndexOf(marker);
+      rootIsChild = at !== -1 && path.basename(file).startsWith('agent-');
+      const base = rootIsChild ? file.slice(0, at + marker.length) : file.slice(0, -'.jsonl'.length) + marker;
+      const pool = files.filter(session => session.provider === 'claude' && session.file !== file && session.file.startsWith(base) && path.basename(session.file).startsWith('agent-'));
+      for (const session of pool) ids.add(session.sessionId);
+      const checked = pool.slice(0, FAMILY_POOL);
+      unchecked = pool.length - checked.length;
+      const metas = new Map();
+      for (const session of checked) metas.set(session.sessionId, await this.meta(session));
+      for (const session of checked) {
+        // Walk up the recorded parents. A repeat or an unknown parent stops the walk; nothing is guessed.
+        const seen = new Set([session.sessionId]);
+        let at = session.sessionId;
+        let reaches = !rootIsChild;
+        let cycle = false;
+        for (;;) {
+          const up = metas.get(at).parent;
+          if (!up) break;
+          if (rootIsChild && up === this.id) { reaches = true; break; }
+          if (seen.has(up)) { cycle = true; break; }
+          if (!metas.has(up)) break;
+          seen.add(up);
+          at = up;
+        }
+        if (!reaches || (rootIsChild && cycle)) continue;
+        const declared = metas.get(session.sessionId).parent;
+        const direct = declared && declared !== this.id ? declared : '';
+        members.push({ file: session.file, key: session.sessionId, sessionId: session.sessionId, modified: session.modified, parent: cycle ? '' : direct, known: !cycle, meta: metas.get(session.sessionId) });
+      }
+      found = rootIsChild ? members.length : pool.length;
+    } else {
+      const root = this.id.toLowerCase();
+      const byParent = new Map();
+      for (const session of files) {
+        if (session.provider !== 'codex') continue;
+        ids.add(session.sessionId.toLowerCase());
+        if (session.parentId && session.file !== file) byParent.set(session.parentId, [...(byParent.get(session.parentId) || []), session]);
+      }
+      const visited = new Set([root]);
+      const queue = [root];
+      while (queue.length) {
+        const parent = queue.shift();
+        for (const session of byParent.get(parent) || []) {
+          const key = session.sessionId.toLowerCase();
+          if (visited.has(key)) continue;
+          visited.add(key);
+          queue.push(key);
+          members.push({ file: session.file, key, sessionId: session.sessionId, modified: session.modified, parent: parent === root ? '' : parent, known: true, declared: parent, meta: null });
+        }
+      }
+      found = members.length;
+    }
+    members.sort((a, b) => b.modified - a.modified || a.key.localeCompare(b.key));
+    const shown = members.slice(0, FAMILY_LIMIT);
+    return { members: shown, files: new Set(shown.map(member => member.file)), ids, found, unchecked, rootIsChild };
+  }
+
+  async read(file, context = {}) {
+    const main = await this.main.read(file);
+    const files = Array.isArray(context.files) ? context.files : [];
+    // Membership is worked out once per folder listing, not once per second.
+    if (this.listing !== files || this.planFile !== file) {
+      this.plan = await this.members(file, files);
+      this.listing = files;
+      this.planFile = file;
+    }
+    const plan = this.plan;
+    let remaining = FAMILY_READ_BUDGET;
+    for (const member of plan.members) {
+      let child = this.children.get(member.file);
+      if (!child) this.children.set(member.file, child = { reader: new TranscriptReader(this.provider, member.sessionId), size: -1, mtime: -1, state: null, error: '' });
+      try {
+        // An unchanged, fully read child is not opened again.
+        const stat = await fs.stat(member.file);
+        child.error = '';
+        if (child.state && !child.state.loading && stat.size === child.size && stat.mtimeMs === child.mtime) continue;
+        if (remaining <= 0) continue;
+        const before = child.reader.offset;
+        child.state = await child.reader.read(member.file, remaining);
+        remaining -= Math.max(0, child.reader.offset - before);
+        child.size = stat.size;
+        child.mtime = stat.mtimeMs;
+      } catch (error) { child.error = error.code || 'unknown'; }
+    }
+    // Readers of transcripts that left the family are dropped; no file handle outlives a read.
+    for (const known of this.children.keys()) if (!plan.files.has(known)) this.children.delete(known);
+
+    const owner = this.provider === 'claude' ? (plan.rootIsChild ? main.parent : this.id) : '';
+    let foreign = 0;
+    const kept = plan.members.filter(member => {
+      const recorded = this.children.get(member.file).state?.parent;
+      // The child's own records must agree with the link that put it in this family.
+      const agrees = !recorded || (this.provider === 'claude' ? !owner || recorded === owner : recorded.toLowerCase() === member.declared);
+      if (!agrees) foreign++;
+      return agrees;
+    });
+    const byKey = new Map(kept.map(member => [member.key, member]));
+    const stateOf = key => key === ROOT_LANE ? main : this.children.get(byKey.get(key).file).state;
+    const lanes = new Map();
+    for (const member of kept) {
+      const child = this.children.get(member.file);
+      const state = child.state;
+      const parentKey = member.parent && byKey.has(member.parent) ? member.parent : ROOT_LANE;
+      const parentState = stateOf(parentKey);
+      const spawn = parentState?.lifecycle.agents.get(member.key) || (member.meta?.call && parentState?.lifecycle.spawns.get(member.meta.call)) || null;
+      const notice = parentState?.lifecycle.notices.get(member.key) || main.lifecycle.notices.get(member.key) || null;
+      // A call ID the parent also holds is the parent's own call (copied history), not the child's work.
+      const own = state ? state.events.filter(event => !parentState?.calls.has(event.id)) : [];
+      const events = own.slice(-LANE_EVENTS).map(event => ({ id: event.id, time: event.time, kind: event.kind === 'prompt' ? 'handoff' : event.kind, label: event.kind === 'prompt' ? 'Task received' : event.label, outcome: event.outcome }));
+      lanes.set(member.key, {
+        key: member.key, parentKey, parentKnown: member.known && (!member.parent || byKey.has(member.parent)), depth: 1, role: 'subagent',
+        label: member.meta?.type || state?.agentLabel || 'Subagent', link: spawn ? 'spawn' : 'records',
+        start: state?.startedAt ? { time: state.startedAt, source: 'own' } : spawn ? { time: spawn.launched, source: 'parent' } : { time: null, source: '' },
+        end: lifecycleEnd(notice, spawn, member.meta), status: state?.status || 'unknown', updatedAt: state?.updatedAt || 0, events,
+        omitted: (state?.droppedEvents || 0) + own.length - events.length, duplicates: state ? state.events.length - own.length : 0,
+        invalidLines: state?.invalidLines || 0, oversizedLines: state?.oversizedLines || 0,
+        loading: !child.error && (!state || state.loading === true), missing: child.error === 'ENOENT', unreadable: Boolean(child.error) && child.error !== 'ENOENT'
+      });
+    }
+    // A child the parent recorded, with no transcript anywhere in the listing, still gets a lane that says so.
+    let missing = 0;
+    for (const key of [ROOT_LANE, ...byKey.keys()]) {
+      const state = stateOf(key);
+      if (!state) continue;
+      for (const [agent, spawn] of state.lifecycle.agents) {
+        if (plan.ids.has(agent) || lanes.has(agent) || agent === this.id.toLowerCase()) continue;
+        missing++;
+        if (lanes.size >= FAMILY_LIMIT) continue;
+        lanes.set(agent, {
+          key: agent, parentKey: key, parentKnown: true, depth: 1, role: 'subagent', label: 'Subagent', link: 'spawn',
+          start: { time: spawn.launched, source: 'parent' }, end: lifecycleEnd(state.lifecycle.notices.get(agent), spawn, null), status: 'unknown', updatedAt: 0, events: [],
+          omitted: 0, duplicates: 0, invalidLines: 0, oversizedLines: 0, loading: false, missing: true, unreadable: false
+        });
+      }
+    }
+    // Main first, then each child under its parent in order of its first recorded time.
+    const ordered = [{ key: ROOT_LANE, parentKey: '', parentKnown: true, depth: 0, role: plan.rootIsChild || main.parent ? 'subagent' : 'main', label: '', link: '',
+      start: { time: main.startedAt || null, source: main.startedAt ? 'own' : '' }, end: { state: 'open', time: null }, status: main.status, updatedAt: main.updatedAt,
+      omitted: main.droppedEvents, duplicates: 0, invalidLines: main.invalidLines, oversizedLines: main.oversizedLines, loading: main.loading === true, missing: false, unreadable: false }];
+    const placed = new Set([ROOT_LANE]);
+    const place = (parentKey, depth) => {
+      const below = [...lanes.values()].filter(lane => lane.parentKey === parentKey && !placed.has(lane.key))
+        .sort((a, b) => (a.start.time ?? Infinity) - (b.start.time ?? Infinity) || a.key.localeCompare(b.key));
+      for (const lane of below) {
+        if (placed.has(lane.key)) continue;
+        placed.add(lane.key);
+        lane.depth = depth;
+        ordered.push(lane);
+        place(lane.key, depth + 1);
+      }
+    };
+    place(ROOT_LANE, 1);
+    for (const lane of lanes.values()) if (!placed.has(lane.key)) ordered.push({ ...lane, parentKey: ROOT_LANE, parentKnown: false, depth: 1 });
+
+    const notes = [];
+    if (plan.rootIsChild || main.parent) notes.push('The followed session is itself a subagent. Its parent and sibling agents are not shown here.');
+    if (plan.found > plan.members.length) notes.push(`Following the ${plan.members.length} most recently written of ${plan.found} subagent transcripts. Totals cover the lanes shown.`);
+    if (plan.unchecked) notes.push(`Only the newest ${FAMILY_POOL} subagent transcripts were checked for links.`);
+    if (missing) notes.push(`${missing} subagent${missing === 1 ? '' : 's'} recorded by a parent ${missing === 1 ? 'has' : 'have'} no transcript in the source folders.`);
+    if (foreign) notes.push(`${foreign} transcript${foreign === 1 ? '' : 's'} in the subagent folder name${foreign === 1 ? 's' : ''} another session and ${foreign === 1 ? 'is' : 'are'} not shown.`);
+    return { ...main, loading: main.loading === true || ordered.some(lane => lane.loading), family: { lanes: ordered, found: plan.found, limit: FAMILY_LIMIT, eventLimit: LANE_EVENTS, notes } };
+  }
+}
+
+// An end is stated only where the source recorded one. `finished` is a recorded flag without a time.
+function lifecycleEnd(notice, spawn, meta) {
+  if (notice) return { state: END_STATES[notice.status] || 'ended', time: notice.time };
+  if (spawn?.ended) return { state: spawn.failed ? 'failed' : 'completed', time: spawn.reported };
+  if (meta?.finished) return { state: 'finished', time: null };
+  return { state: 'open', time: null };
+}
+
 // Lists every transcript file with its stat. Nothing is opened here.
 async function walkSources({ claudeRoot, codexRoot }) {
   const files = [];
   const warnings = [];
-  async function walk(folder, provider, root = false) {
+  async function walk(folder, provider, root = false, nested = false) {
     let entries;
     try { entries = await fs.readdir(folder, { withFileTypes: true }); }
     catch (error) {
@@ -106,12 +338,12 @@ async function walkSources({ claudeRoot, codexRoot }) {
     }
     for (const entry of entries) {
       const file = path.join(folder, entry.name);
-      if (entry.isDirectory()) await walk(file, provider);
+      if (entry.isDirectory()) await walk(file, provider, false, nested || entry.name === 'subagents');
       else if (entry.isFile() && entry.name.endsWith('.jsonl') && (provider === 'claude' || entry.name.startsWith('rollout-'))) {
         try {
           const stat = await fs.stat(file);
           const id = provider === 'codex' ? entry.name.match(/([0-9a-f-]{36})\.jsonl$/i)?.[1] || entry.name.slice(8, -6) : entry.name.replace(/^agent-/, '').slice(0, -6);
-          files.push({ id: `${provider}:${createHash('sha256').update(file).digest('hex').slice(0, 20)}`, sessionId: id, file, provider, modified: stat.mtimeMs, size: stat.size, identity: `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`, project: '', child: path.basename(folder) === 'subagents' });
+          files.push({ id: `${provider}:${createHash('sha256').update(file).digest('hex').slice(0, 20)}`, sessionId: id, file, provider, modified: stat.mtimeMs, size: stat.size, identity: `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`, project: '', child: nested });
         } catch (error) {
           if (error.code !== 'ENOENT') warnings.push(`${provider} transcript metadata could not be read (${error.code || 'unknown'}).`);
         }
@@ -171,6 +403,9 @@ async function discoverSessions(roots, options = {}) {
     if (!entry && !unreadable.has(session)) { session.workspaceKey = undefined; pending.workspaces++; continue; }
     const identity = workspaceIdentity(entry?.cwd);
     session.project = identity ? projectName(entry.cwd) : '';
+    // Host only: the parent thread a Codex rollout names in its own first record (S04).
+    session.parentId = entry?.parent || '';
+    if (session.parentId) session.child = true;
     session.workspaceKey = identity ? identity.key : UNKNOWN_WORKSPACE_KEY;
     if (identity && !identities.has(identity.key)) identities.set(identity.key, identity);
     counts.set(session.workspaceKey, (counts.get(session.workspaceKey) || 0) + 1);
@@ -279,7 +514,7 @@ async function readMetadata(session, budget, titles) {
     const identity = `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
     // Checked against the open file, not the listing: a listing reused for a new query can be a few seconds old.
     if (!entry || replaced(entry, identity, stat.size, stat.mtimeMs)) {
-      entry = { identity, offset: 0, size: 0, headSize: -1, cwd: '', headDone: false, custom: '', generated: '', carry: Buffer.alloc(0), skipping: false };
+      entry = { identity, offset: 0, size: 0, headSize: -1, cwd: '', parent: '', headDone: false, custom: '', generated: '', carry: Buffer.alloc(0), skipping: false };
       metadataCache.set(session.file, entry);
     }
     if (!entry.headDone && entry.headSize !== stat.size) {
@@ -292,7 +527,12 @@ async function readMetadata(session, budget, titles) {
         let record;
         try { record = JSON.parse(line); } catch { continue; }
         const cwd = record?.type === 'session_meta' ? record.payload?.cwd : record?.cwd;
-        if (typeof cwd === 'string' && cwd.trim()) { entry.cwd = cwd; break; }
+        if (typeof cwd === 'string' && cwd.trim()) {
+          entry.cwd = cwd;
+          const parent = record.type === 'session_meta' ? record.payload.source?.subagent?.thread_spawn?.parent_thread_id : '';
+          entry.parent = typeof parent === 'string' && /^[\w-]{1,80}$/.test(parent) ? parent.toLowerCase() : '';
+          break;
+        }
       }
       entry.headDone = !!entry.cwd || bytesRead >= HEAD_PREVIEW;
       entry.headSize = stat.size;
@@ -366,4 +606,4 @@ function workspaceLabels(identities) {
   return labels;
 }
 
-module.exports = { TranscriptReader, discoverSessions, SESSION_LIMIT };
+module.exports = { TranscriptReader, FamilyReader, discoverSessions, SESSION_LIMIT, FAMILY_LIMIT, LANE_EVENTS };
