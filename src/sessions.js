@@ -24,6 +24,17 @@ const UNKNOWN_WORKSPACE_LABEL = 'Unknown workspace';
 // Host-only scan positions and the latest cleaned titles, keyed by transcript path. Nothing here is sent to the view.
 const metadataCache = new Map();
 
+// WARNING: disclosed plausibility window (S08). A record dated before 2000 or more than a day after this
+// machine's clock is counted as malformed: one such record would otherwise stretch the time axis and make a
+// session read as recently active for good.
+const EARLIEST_TIME = Date.UTC(2000, 0, 1);
+const CLOCK_SLACK = 24 * 60 * 60 * 1000;
+function usableTime(value) {
+  if (typeof value !== 'string') return false;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && time >= EARLIEST_TIME && time <= Date.now() + CLOCK_SLACK;
+}
+
 class TranscriptReader {
   constructor(provider, id) {
     this.provider = provider;
@@ -50,7 +61,15 @@ class TranscriptReader {
       if (!line.trim()) continue;
       let record;
       try { record = JSON.parse(line); } catch { this.state.invalidLines++; continue; }
-      if (record?.timestamp !== undefined && typeof record.timestamp !== 'string') { this.state.invalidLines++; continue; }
+      // A line that parses but is not a record object is malformed too.
+      if (!record || typeof record !== 'object' || Array.isArray(record)) { this.state.invalidLines++; continue; }
+      if (record.timestamp !== undefined && !usableTime(record.timestamp)) {
+        this.state.invalidLines++;
+        if (typeof record.timestamp !== 'string') continue;
+        // Counted, and kept out of the activity. What the record says without a time (working directory,
+        // session metadata) is still read.
+        record = { ...record, timestamp: undefined };
+      }
       try { applyRecord(this.state, record); } catch { this.state.invalidLines++; }
     }
     if (Buffer.byteLength(this.tail, 'utf8') > MAX_LINE) {

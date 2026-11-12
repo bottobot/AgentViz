@@ -55,7 +55,9 @@ function cleanTarget(value) {
 }
 function sourceRoots() {
   const config = vscode.workspace.getConfiguration('agentviz');
-  return { claudeRoot: config.get('claudeRoot') || path.join(os.homedir(), '.claude'), codexRoot: config.get('codexRoot') || path.join(os.homedir(), '.codex') };
+  // A hand-edited setting can hold any JSON value. Anything that is not non-blank text means "use the default".
+  const folder = (key, fallback) => { const value = config.get(key); return typeof value === 'string' && value.trim() ? value : path.join(os.homedir(), fallback); };
+  return { claudeRoot: folder('claudeRoot', '.claude'), codexRoot: folder('codexRoot', '.codex') };
 }
 
 let panel;
@@ -110,6 +112,9 @@ function openPanel(context) {
     // The same sessions as a list, host only: the family reader looks for subagent transcripts in it.
     let sourceFiles = [];
     let query = cleanQuery();
+    // The request the current catalogue was worked out for. A message is numbered as the answer to the view's
+    // newest request only when it is: a request can arrive while a transcript is being read.
+    let answered = query;
     let selected;
     let reader;
     let lastWalk = 0;
@@ -153,6 +158,7 @@ function openPanel(context) {
             selected = first && (all.find(session => session.id === first.id) || first);
           }
           catalog = { ...emptyCatalog(), ...discovered };
+          answered = asked;
           index = new Map(all.map(session => [session.id, session]));
           sourceFiles = all;
           if (listingDue) lastWalk = Date.now();
@@ -176,7 +182,7 @@ function openPanel(context) {
         await current.webview.postMessage({
           type: 'state', selectedId: selected?.id || '', selected: selected ? catalogueEntry(selected) : null, snapshot,
           sessions: catalog.sessions.map(catalogueEntry), workspaces: catalog.workspaces.map(workspaceEntry),
-          lookup: { seq: query.seq, total: count(catalog.total) || catalog.sessions.length, matched: count(catalog.matched) || catalog.sessions.length, limit: count(catalog.limit),
+          lookup: { seq: answered === query ? query.seq : 0, total: count(catalog.total) || catalog.sessions.length, matched: count(catalog.matched) || catalog.sessions.length, limit: count(catalog.limit),
             pendingNames: count(catalog.pending.names), pendingWorkspaces: count(catalog.pending.workspaces), missing: Boolean(selected?.missing) },
           warnings
         });
@@ -207,6 +213,9 @@ function openPanel(context) {
         // A reloaded view starts its request numbering again, so its first request is taken as it comes.
         ready = true;
         query = cleanQuery(message.query);
+        // Asked again on the next pass when a pass is already running; that pass's list answers the old request.
+        lastWalk = 0;
+        lookupDue = true;
         void refresh(true);
       }
       else if (message.type === 'query') {

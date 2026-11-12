@@ -346,7 +346,9 @@ function push(state, event) {
 }
 
 function marker(state, time, kind, id, label) {
-  const key = `${kind}:${id || time}`;
+  // The source's record ID is used only when it is short plain text; anything else falls back to the time, so a
+  // corrupt record cannot put unbounded or structured content into an event ID.
+  const key = `${kind}:${typeof id === 'string' && id && id.length <= 160 ? shortName(id) : time}`;
   if (state.markers.has(key)) return;
   state.markers.add(key);
   push(state, { id: key, time, kind, label, outcome: 'success' });

@@ -13,7 +13,7 @@ The executable schedule is `workflows/agentviz-next.plan.json`, named **AgentViz
 | S05 explicit task progress | Implemented, awaiting board review | d5e522 (plan card a40b39) | See `git log` on `task/d5e522` (commit titled "feat: show progress from explicit agent task lists (S05)") | `npm test` 83/83, `npm run check` exit 0; no local list records exist, see S05 below |
 | S06 file footprint | Implemented, awaiting board review | b43ef6 (plan card a40b39) | See `git log` on `task/b43ef6` (commit titled "feat: show a file activity footprint (S06)") | `npm test` 95/95, `npm run check` exit 0, local sample 40 + 40 transcripts; Codex not covered locally, see S06 below |
 | S07 AgentBoard entry command | Implemented, awaiting board review | aaa089 (plan card a40b39) | See `git log` on `task/aaa089` (commit titled "feat: add a narrow entry command for another extension (S07)") | `npm test` 102/102, `npm run check` exit 0, VS Code host run 13/13 checks; no AgentBoard caller exists, see S07 below |
-| S08 reliability and cost | Pending | Not allocated | None | Not run |
+| S08 reliability and cost | Implemented, awaiting board review | 5df10f (plan card a40b39) | See `git log` on `task/5df10f` (commit titled "fix: harden the combined view and record its cost (S08)") | `npm test` 117/117, `npm run check` exit 0, synthetic benchmark of 3,471 transcripts; not run in a webview, see S08 below |
 | S09 Windows acceptance | Pending | Not allocated | None | Not run |
 | S10 review and local package | Pending | Not allocated | None | Not run |
 
@@ -559,4 +559,123 @@ Host run checks (13): the five existing ones (activation, editor opened, reuse, 
 - The command is reachable by any extension in the window and by a keybinding with arguments. It can only select a session already in the configured source folders.
 - Linux and VSCodium were not run.
 
-Next action: board review of `task/aaa089`, then S08.
+Next action at the end of S07: board review of `task/aaa089`, then S08 (now done, below).
+
+## S08: Check resilience and cost of the combined view
+
+Owner: card `5df10f`, branch `task/5df10f`, AgentBoard worktree. Dependency commit: `9c8d2a0` (S07 integrated). Code commit: the commit on this branch titled "fix: harden the combined view and record its cost (S08)". Review and integration: pending, done by the board.
+
+### Headline
+
+Five defects were found by the new tests and fixed, each with a regression that fails on the previous sources. Cost on a synthetic history of 3,471 transcripts is bounded and every cap that shaped a number is shown in the view. No private sentinel reached a host message or the page. **Not measured:** the cost of the per-second message inside a real webview (S09).
+
+**Scope note for the reviewer.** The card lists `test/` and this record as the work area. The step also says "fix measured problems", so the fixes below are small edits in `src/extension.js`, `src/sessions.js` and `src/transcript.js` (about 30 lines added, 4 removed). Nothing in `media/`, `README.md` or `package.json` changed.
+
+### Findings and fixes
+
+| # | Finding (how it was exercised) | Fix | Regression in `test/resilience.test.js` |
+| --- | --- | --- | --- |
+| 1 | **Stale answer.** A filter request that arrived while a transcript was being read was answered with the previous list under the new request number. The view accepts an answer by that number, so it could show "No sessions match" or the old matches until the next pass. | `src/extension.js`: the host remembers which request the catalogue answers. A message is numbered for the newest request only when it answers it; otherwise it carries 0 and the view drops it. | "filters asked while a transcript is being read…" |
+| 2 | **Reloaded view not answered.** A `ready` from a reloaded view that arrived during a pass did not ask for a new lookup; the old list stood for up to 10 s. Seen once fix 1 was in place (the test timed out). | `src/extension.js`: `ready` marks the lookup and the folder listing as due. | second half of the same test |
+| 3 | **One bad date faked activity.** A record dated in year 9999 made the session read "Last record 0s ago / Recent activity" for good and stretched the time axis; the largest valid date put `NaN` in the page. A string that is not a date dropped the record without counting it. | `src/sessions.js`: a timestamp must be a date from 2000 to one day after this machine's clock. Otherwise the record is counted as malformed and adds no activity; its working directory and session metadata are still read. | "records with unusable timestamps…" |
+| 4 | **Uncounted malformed lines.** A line holding valid JSON that is not a record (`null`, `123`, a string, an array, `true`) was skipped without being counted. | `src/sessions.js`: counted as malformed. | "malformed and oversized records…" |
+| 5 | **Unbounded marker ID.** A prompt, turn-end or compaction marker used the record's `uuid`, `id` or `turn_id` as is. A corrupt record could put megabytes, or an object, into an event ID sent every second. Not a realistic secret path; a bound was missing. | `src/transcript.js`: the ID is used only when it is text of at most 160 characters; otherwise the marker falls back to its time. | "hostile shapes inside well-formed records…" |
+| 6 | **Error every second.** A source setting holding a non-text value (a hand-edited settings file: a number, list, object, `true`) made each one-second pass raise "AgentViz could not refresh (ERR_INVALID_ARG_TYPE)". | `src/extension.js`: anything that is not non-blank text means the default folder. | "a source setting that is not usable text…" |
+
+Rows 1 and 2 are one defect in the headline count (the same stale-answer path).
+
+### What was exercised and held without a change
+
+All on real files in a temporary folder, through the real adapters. The host tests run the real `src/extension.js` on a stand-in for the VS Code API.
+
+- **Partial writes.** A record cut inside a multi-byte character, a complete record without its newline, and one byte per write with a read after each: one event, nothing counted as malformed. A write cut off for good is one malformed record and the next record applies.
+- **Oversized records.** A complete 5 MB record and one still being written with no newline: each counted once, nothing of them kept, later records apply.
+- **Replacement.** Written again under the same name, cut short in place, removed while followed and returned: no old event, task label, footprint, lane or child reader survives. A failed read reports only an error code.
+- **Sampled rewrites.** A same-length edit wholly between the first and last 4 KB, followed by an append, is **missed** on ordinary passes. **Refresh recovers it** (the Read becomes an Edit and the footprint follows). The same edit inside the first 4 KB is caught on the next pass. The test also checks that `README.md` still states this limitation.
+- **Source change during a read and during a lookup.** Nothing of the old source (IDs, names, project labels, warnings) is in any later message. The old reader is dropped. An old catalogue ID cannot be selected and the entry command answers `not-found` for an old session.
+- **Hidden panel.** No folder listing, no read and no message while hidden, with 60 s of host clock passing. On return the same filters and followed session are answered, and what was written meanwhile is read.
+- **Disposal and reopen.** Closing during a read and during a lookup: no message, no error, timer cleared, three listeners disposed, no further work. 25 reopen cycles: one panel and one timer per cycle, a new script nonce each time, the followed session restored, only that view's own filters applied, a second open reveals the panel.
+- **Filters across updates.** The real `media/app.js` connected to the real host: after new activity, a rename of the followed session and two new sessions, the typed name, the chosen project and the focus are untouched, the inputs were never written, no `select` was sent, and the list shows the rename and the new match only.
+- **Obsolete source text in the view.** After a source change the page holds no name, ID or project of the old source, with one deliberate exception: the user's own chosen project filter stays chosen and reads "Work/storefront (not in the current list)" until Clear filters. This is the S02 rule, now recorded as the only leftover.
+
+### Privacy probe of the final host message
+
+Real host, real adapters, one Claude family and one Codex family, with `PRIVATE_` sentinels in prompts, reasoning, commands, command descriptions, tool output, file contents, patch bodies, URL paths, queries and credentials, working directories, source folder names, link-record descriptions, task active forms and index extras. Every message of the run was checked (selection, a filter, a missing session, Refresh).
+
+- 0 of 9 sentinels in any message or in the page drawn from it.
+- No drive, UNC, home or temporary folder path, and no transcript or link file name.
+- Every field name at every level matches a fixed list in the test; a field added later fails until it is listed.
+- Longest text anywhere in a message: at most 200 characters.
+- Labels that did get through, all of them: the generic ones ("Running a command", "Searching files", and so on), the last two path segments of a file or search path ("Reading src/checkout.js", "Reading storefront/src"), a host name ("Fetching example.org"), a command's first word ("Running curl"), and an MCP tool's own name.
+
+### CSP and package resource roots
+
+- Panel options: `enableScripts: true`, `localResourceRoots` is the `media` folder only, no `retainContextWhenHidden`.
+- Policy: `default-src 'none'; style-src <webview source>; script-src 'nonce-…'; connect-src 'none'; base-uri 'none'; form-action 'none'`. No `unsafe-inline`, `unsafe-eval`, wildcard or remote scheme. Two script tags, both external and carrying the nonce; a new nonce per panel.
+- `media/` holds exactly `app.js`, `view.js`, `style.css`. No network call, code evaluation, browser storage, inline style, inline handler or remote URL in them; no `url()` or `@import` in the stylesheet. The page drawn from live and example data has none either.
+- `src/` requires only Node builtins, its own files and `vscode`; it writes no file, starts no process and opens no socket.
+- `npx --no-install vsce ls --no-dependencies` lists 9 files: `package.json`, `README.md`, the four `src` files and the three `media` files. No test, fixture, document or workflow file. `package.json` has no `dependencies`.
+
+### Cost on a synthetic history (2026-11-12, Windows 11, Node v26.7.0)
+
+`node test/benchmark.js artifacts/s08/benchmark.json`. It writes the fixture to a temporary folder and removes it afterwards. Three runs after the fixes; ranges are across those runs. One run before the fixes is in `benchmark-before.json` and falls inside the same ranges.
+
+Fixture: 3,471 transcripts, 369 MB, 296 projects, 441 subagent transcripts. That is 2,100 small Claude sessions, 300 small children, 1,000 Codex rollouts with an index, 40 Claude transcripts of 5 MB, and one family: a 64 MB main transcript (55,400 calls) with 30 children of 2.1 MB each (54,000 calls).
+
+| Step | Files / events | Bytes read | Elapsed |
+| --- | --- | --- | --- |
+| Discovery, first three calls (cold) | 1,556 / 1,516 / 471 opened; projects unread 1,971, then 471, then 0 | 281 MB / 90 MB / 2.8 MB | 1.6 to 1.9 s / 1.4 to 1.9 s / 0.6 to 0.7 s |
+| Ordinary refresh, fresh folder listing | 3,471 listed, 0 opened | 30 KB (Codex index) | 0.33 to 0.39 s |
+| Full ID of the oldest session, reused listing | 1 match, outside the recent 80, 1 opened | 6.5 KB | 15 to 28 ms |
+| One project, reused listing | 16 matches, 15 opened | 87 KB | 26 to 33 ms |
+| Name search, cold | 2,384 opened, 28 matches, 1 call | 14 MB | 1.7 to 1.9 s |
+| Name search, repeated | 0 opened | 30 KB | 17 to 21 ms |
+| Following the family, first load | 9 passes; 10,000 of 55,401 main events kept; 24 of 30 lanes | 121 MB | 1.0 to 1.4 s of work; slowest pass 0.28 to 0.35 s |
+| Pass with nothing new | 25 files checked, 0 opened | 0 | 6 to 11 ms |
+| Pass after an append (101 records) | 2 files | 56,910 in the main transcript, exactly what was appended, plus the child's record | 7 to 15 ms |
+| One host message at full retention | 53,225 events (10,000 main, 43,224 in lanes) | 5.5 MB of JSON | 20 to 27 ms to serialise |
+| Drawing that message with the real view, in Node | 52 KB of HTML | | 41 to 65 ms |
+
+- **Responsiveness.** Longest stretch the host's event loop was held in any phase: 9 to 42 ms. The Windows timer step is about 16 ms, so values under that are at the floor of the measurement. A pass does not hold a message or a keystroke longer than that.
+- **Pacing.** The first cold discovery calls read far more than the project previews because the 80 returned sessions are the large ones here and their names are read whole. In the host, the family's 9 passes are one second apart, so the first load takes about 9 s on the clock while "Loading history" is shown.
+- **Memory.** Benchmark process at the end, fixture writing included: 82 to 122 MB heap, 242 to 273 MB resident.
+
+Caps that shaped these numbers, each stated in the view when reached (test "every cap that shapes the view…"): 80 returned sessions; 10,000 retained events per transcript; 24 subagent lanes; 2,000 events sent per lane; 8 MB of the followed transcript and 24 MB of subagent transcripts per pass; 1,500 first project reads and 256 MB of name reading per lookup; 4 MB per record. The benchmark prints the same list beside its results.
+
+No cost fix was made. Nothing measured here needs one, and the one open cost question (first gap below) was not measured where it matters.
+
+### Checks (worktree, PowerShell 7, Node v26.7.0)
+
+| Command | Result |
+| --- | --- |
+| `node --test test/resilience.test.js` with the new tests on the previous sources (`9c8d2a0`, extracted with `git archive`) | exit 1: 15 tests, 10 pass, 5 fail (the regressions for rows 1 and 2, 3, 4, 5 and 6) |
+| `npm test` on this branch | exit 0: 117 tests, 117 pass, 0 fail |
+| `npm run check` on this branch | exit 0 |
+| `node --test test/resilience.test.js`, four times in a row | exit 0 each time, about 1.7 s |
+| `node test/benchmark.js artifacts/s08/benchmark.json` | exit 0, three times; 0 sentinels in the message and the page |
+| `npx --no-install vsce ls --no-dependencies` | exit 0: 9 files |
+
+Regressions added (15, all in `test/resilience.test.js`): pieces of a record; unusable timestamps; malformed and oversized records; hostile record shapes; replacement, truncation and removal; Refresh and the rewrite samples; filters asked during a read; a source changed during a read or a lookup; a non-text source setting; a hidden panel; closing and reopening; filters across updates and a new source; the host message probe; the webview policy and package roots; visible caps. Ten of them pass on the previous sources too: they guard behaviour that was already right and do not prove a fix. The fix in row 2 has no separate failing run on the previous sources, because that test already fails there at row 1.
+
+New test support, with no behaviour of its own: `test/resilience-fixture.js` (synthetic records and the host stand-in), `test/navigation-harness.js` (the DOM stand-in moved out of `test/navigation.test.js`, whose 16 tests are otherwise unchanged), `test/benchmark.js` (not part of `npm test`).
+
+### Evidence
+
+- `test/resilience.test.js`, `test/benchmark.js` and their fixtures. All data is synthetic.
+- `artifacts/s08/` in this worktree (git-ignored, local only): `benchmark.json`, `benchmark-run1.json`, `benchmark-run2.json` (after the fixes), `benchmark-before.json` (before), `baseline-before-change.txt` (the failing run on the previous sources), `package-file-list.txt`.
+
+### Gaps and limits
+
+- **Not run in a webview or a VS Code host.** The page side is the real `media/app.js` on a stand-in DOM and the real view in Node. S09 owns host and browser acceptance.
+- **The per-second message is large and its webview cost is unmeasured.** At full retention the host sends 5.5 MB every second, changed or not, and the view rebuilds its page from it. Serialising and drawing took under 0.1 s in Node. Transfer into the webview, parsing there and the DOM update were not measured. If S09 sees a slow tab on a large family, the fix is to send only when something changed plus a small clock tick; that needs a view change and was not made on speculation.
+- **No real transcripts were read in this step.** The numbers are for the synthetic fixture. The S03 and S04 records hold the real-folder timings (a 42 s cold name search over 7.2 GB; a 59 s load of a large Codex family); nothing here changes those.
+- **The timestamp window uses this machine's clock.** A transcript written on a machine whose clock runs more than a day ahead would have its records counted as malformed. `README.md` does not mention the window yet; the view shows the count. Pending for S10, which owns the README.
+- **The rewrite sample limitation stands**, as documented in the README: an edit wholly between the first and last 4 KB read is missed until Refresh, or until the file shrinks or is replaced.
+- **Label policy, restated.** A file or search path contributes its last two segments to an event label. For a shallow path that includes a parent folder name. A call ID and a file name are shown cut to 160 characters.
+- **A closed panel stays in the extension's subscription list** until the extension is deactivated: 29 entries after 27 panels in the stand-in. Its timer and listeners are released. Whether VS Code keeps anything large alive through it was not measured.
+- After a request arrives mid-pass, that pass's message is dropped by the view, so one activity update is skipped (about one second).
+- The first selection of a reopened panel with no saved choice is the newest session that matches the view's filters. Only an explicit choice is restored.
+- The longest-block figures are from Node's event loop monitor at 1 ms resolution on Windows; they bound host responsiveness, not the webview's.
+- Contrast and screen reader output were not measured. Linux and VSCodium were not run.
+
+Next action: board review of `task/5df10f`, then S09.
