@@ -12,7 +12,7 @@ Why (Robert): long-horizon tasks are complex and hard to keep track of. Reading 
 
 Development started on 11 November 2026. The workspace now has a Git repository, a standalone VS Code extension, Claude and Codex transcript adapters, and a stations map with an activity strip. The initial implementation uses Windows as its verification target and reads local transcripts directly. See `README.md` for running and checking it, and `docs/development/2026-11-11-first-slice.md` for the first slice's scope. The research and original decisions below remain historical context.
 
-The next development batch is prepared for AgentBoard orchestrator mode in `ORCHESTRATION.md`, with native caps, policy and check catalogue files under `workflows/`. Its first priority is the user's requested navigation order: project/workspace, session name, session ID, with filtering. Those changes are pending. `docs/development/agentviz-next-run.md` records that no run has started. The format audit is in `docs/development/2026-11-11-orchestration-format-audit.md`.
+The next development batch is `workflows/agentviz-next.plan.json`, listed by AgentBoard's **Run a Plan** picker as **AgentViz: find and follow sessions**. `ORCHESTRATION.md` is its supporting product brief. The JSON file supplies the schedule, dependencies, checks and native model review. Its first priority is the user's requested navigation order: project/workspace, session name, session ID, with filtering. Those changes are pending. `docs/development/agentviz-next-run.md` records that no run has started. The corrected format audit is in `docs/development/2026-11-11-orchestration-format-audit.md`.
 
 ## What Robert has decided
 

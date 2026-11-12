@@ -2,7 +2,7 @@
 
 **Goal:** Make long coding sessions easy to find by project or workspace, then session name, then session ID, and easy to follow through truthful activity, agent lanes, task progress and file activity.
 
-**Execution:** One AgentBoard root orchestrator coordinates native board child cards. This document is its coordinating record. AgentBoard does not automatically expand this Markdown into a dependency graph. Use the board's own cards, checks, review and recovery mechanisms.
+**Execution:** In AgentBoard, choose Run a Plan and select `AgentViz: find and follow sessions` from `workflows/agentviz-next.plan.json`. That schema compliant file is the executable schedule. This Markdown is the supporting product brief; it does not instruct workers to create cards or submit another orchestrator plan.
 
 **Architecture:** Extend the current Node builtin transcript adapters and plain SVG webview. Keep source collection in the extension host and send only approved display metadata and normalized events to the view. Retain a separate VS Code extension and the existing read only data flow.
 
@@ -93,55 +93,27 @@ Defer Linux/VSCodium verification, remote machines, replay/scrubbing, game world
     - Accept when `unit`, `syntax`, the actual host run and browser inspection all have separate receipts. Mark unavailable environments as unverified and keep the milestone open instead of asserting those checks passed.
 
 10. **S10: Independently review, package and hand off.** Owner: release worker; an independent board review card checks the result. Depends on: S09 accepted and integrated. Own: `README.md`, `HANDOFF.md`, `docs/development/agentviz-next-evidence.md`, the execution record and packaging metadata only if needed.
-    - Have a reviewer who did not implement the relevant change inspect the integrated diff against this contract. Include adversarial workspace/name/ID cases and the previous first slice regressions. Fix reproduced material findings through the appropriate worker and repeat only affected checks.
+    - Inspect the integrated changes against the product contract and record material findings. AgentBoard's native model review independently reviews each step, including this release; no additional review card is needed.
     - Run `unit`, `syntax` and `package`. Inspect the actual VSIX inclusion set and checksum; omit transcripts, private source metadata, ignored evidence, development dependencies and orchestration material. Do not manufacture a green host receipt from Node unit test results.
     - Update current behavior, source coverage, launch instructions, evidence locations and remaining limitations. Record child/review card IDs, delivered commits and the final integration commit in the execution record.
-    - Accept when all ten outcomes are reviewed, required checks have completed, a local VSIX exists, and the handoff clearly distinguishes implemented, verified and deferred work. Leave publication, normal profile installation, remote push and cross project caller changes unexecuted.
+    - Accept when prior outcomes are accepted and this release is ready for native review, required checks have completed, a local VSIX exists, and the handoff clearly distinguishes implemented, verified and deferred work. Leave publication, normal profile installation, remote push and cross project caller changes unexecuted.
 
-## Dispatch and acceptance
+## Run a Plan
 
-Use `workflows/agentviz-next.caps.json` and `workflows/agentviz-next.policy.json`. The proposed limits are four open cards, 32 total cards, depth two and two automatic follow ups. Ten delivery outcomes plus independent reviews leave room for bounded repairs. These are coordination limits, not a dollar or token budget. Do not silently increase them or create a fresh run to evade them.
+Open AgentBoard in this workspace, choose **Run a Plan**, select **AgentViz: find and follow sessions**, inspect the preview and choose Run. The file is `workflows/agentviz-next.plan.json`. It declares ten steps, explicit sequential dependencies, named checks and `review: model`. Account, model, effort and permission values use the board's current defaults and preview; no obsolete provider alias is pinned here.
 
-S01 through S10 are logical labels. In `board.js add --after`, use actual returned six hexadecimal character card IDs. Record the mapping as soon as allocation succeeds. A queued allocation is not evidence that a worker session ran.
+Run approval and scheduling come from this native plan flow. Do not create a separate root orchestrator, call `board.js plan`, allocate extra cards, or use the former caps/policy proposal. Plan runs refuse manual add/adopt/plan operations. The plan schema has no caps or policy fields; this file does not pretend to apply custom limits. The declared ten steps and existing board limits bound the work.
 
-Run one implementation worker at a time across the shared parser, host and renderer files. Read only review and evidence preparation may overlap when their source commit is fixed. Every child receives a bounded packet: its one outcome above, current dependency commits, allowed files, common privacy/runtime boundaries, exact check names, and required final evidence. Do not paste the whole research survey or private transcripts into every packet. No extra coordinator is needed for this dependency chain; split a stuck outcome into bounded child work only within the approved depth/capacity.
+## Acceptance and integration
 
-Each implementation card uses a native completion rule with `commands: ["unit", "syntax"]`, a concrete `goal`, and a `doneWhen` describing that outcome in fewer than 1000 characters. The release card also names `package`. Use `--rule-file` with that single rule object. Check names come from `workflows/checks.json`; they are not arbitrary shell text. Passing the current suite alone does not prove a new feature: require a regression that failed before the change and acceptance evidence tied to the requested behavior.
+The JSON file's step IDs are the dependency keys; AgentBoard resolves them to actual card IDs. Each step reads its named outcome above, works in its declared files, adds meaningful regressions and runs `unit` and `syntax` from `workflows/checks.json`. The release also runs `package`. The board supplies native model review and integrates accepted dependency changes into the plan branch before starting dependent work. Do not manually merge into the main checkout or push.
 
-Inspect `show <id> --last 20`, the actual diff, commit and check receipt before accepting a child. A review reply must say accepted or list concrete reproduced defects and evidence gaps. A reviewer remains read only; use the owning worker for fixes. Integrate accepted commits into the root's authorized worktree before opening a dependent implementation. Do not reuse a passed check receipt from an older commit after changing covered code.
-
-## Run startup
-
-In the AgentViz workspace, create an AgentBoard task with its Orchestrator option enabled. Give it this launch instruction:
-
-```text
-Develop AgentViz according to ORCHESTRATION.md in this checkout. Act as the AgentBoard root orchestrator. Read the current Git state, ORCHESTRATION.md, docs/development/2026-11-11-orchestration-format-audit.md and docs/development/agentviz-next-run.md. Preserve the existing first slice. Resolve your actual board identity, accounts, models and capabilities, propose the supplied caps/policy through board.js plan, and end that planning turn for AgentBoard's root approval. After approval, use native board child cards, complete S01 through S10 with their evidence gates, and maintain the durable execution record. Do not execute the work as one oversized chat task or silently substitute an unsupported runtime.
-```
-
-The bound orchestrator resolves its current CLI with native PowerShell and checks that it exists:
-
-```powershell
-$agentVizBoard = Join-Path ([Environment]::GetFolderPath('UserProfile')) '.agentboard\board.js'
-if (-not (Test-Path -LiteralPath $agentVizBoard)) { throw 'AgentBoard CLI is unavailable' }
-node $agentVizBoard show self
-node $agentVizBoard capabilities
-node $agentVizBoard models --json
-node $agentVizBoard accounts --json
-node $agentVizBoard plan --caps-file workflows/agentviz-next.caps.json --policy-file workflows/agentviz-next.policy.json
-```
-
-Use only currently advertised signed in accounts, runtimes, model IDs and effort values. Prefer the user's available Luna equivalent at maximum effort for suitable worker packets, if the board advertises it; select a supported stronger reviewer when needed. Resolve this at launch rather than hardcoding a dated model alias. AgentBoard's current capabilities decide unattended provider support. If a requested route is unavailable, report it instead of quietly switching providers.
-
-The root approval gate comes from AgentBoard's own orchestrator protocol, documented in its `docs/orchestrator/BRIEF.md` and `docs/agents/README.md`. Writing this plan has not requested that approval, created cards or launched workers. At execution time, approval happens once for the concrete root proposal; ordinary decisions and repairs within its scope do not need repeated permission requests.
+A passed existing suite is not proof of a new feature. Require behavior specific regression evidence and a review of the delivered diff. GUI checks and live source compatibility remain separately evidenced outcomes. Do not replace missing receipts with assumptions. The files under workflows are excluded from the production VSIX.
 
 ## Continuity and recovery
 
-Maintain `docs/development/agentviz-next-run.md` after each allocation, accepted delivery, integration, failure or scope change. Record logical outcome, actual card ID, owning worktree, status, source commit, delivered commit, check command/exit/result, review verdict, blockers and next action. Keep logs and screenshots under ignored `artifacts/` and store concise evidence references and conclusions in the durable record. Never copy real transcript bodies or secrets into the record.
+Maintain `docs/development/agentviz-next-run.md` with actual native step/card identity, source and delivery commits, commands/results, review state, evidence locations, blockers and next action. Update only your own outcome during implementation; the final handoff reconciles all prior outcomes. Real board state and Git history remain authoritative. Do not claim an allocation, interrupted command, pending check or unreadable artifact is a delivered result.
 
-On resume, first inspect Git status/log, the execution record, `show self`, `list --mine --all`, relevant `show` results and queued `receive` messages. Confirm the current card/session binding. Reconcile actual files and receipts with prior claims. Resume the existing owned card where possible; do not duplicate a finished or still running outcome. A missing artifact in a new worktree is a missing receipt, not proof that the implementation failed.
+On resume, inspect Git status/log, this brief, the native plan card and your existing step state before editing. Reuse the interrupted step through AgentBoard's own controls and preserve a user paused run. Do not duplicate the workflow or create an independent coordinator. Follow the native generated worker prompt when blocked: report the concrete blocker and preserved evidence rather than silently reducing acceptance.
 
-Use `wait --mine --timeout 60` for a bounded observation window; a timeout means no new state, not success or failure. Preserve a user paused run. A permission wait, interrupted command, failed launch or pending check remains unresolved. Read the actual failure before attributing it to a provider or environment. After two unsuccessful fix follow ups, split or replan the work within the remaining approved capacity; after three identical failure signatures, change the approach instead of repeating it.
-
-Close only cards belonging to this run. Do not claim unrelated work, impersonate card IDs, edit board state files directly or discard worktrees. Use board supported resume/stop/cancel/handoff operations when needed. If a true blocker remains, record a reproducible failure, preserved work and the exact missing input; continue independent authorized work.
-
-After all descendants are accepted and integrated, request delivery readiness with `ready` and provide the local handoff. AgentBoard's `finish self` route can trigger merge, push and cleanup. Do not call it while it would violate this run's local only policy; leave that external finishing action to separately authorized app controls. `noSync` is not proof that every hook or finish path suppresses synchronization.
+The run ends with reviewed local changes and a local package. Leave Finish, remote push, normal profile installation, publication and cross project caller changes to separately authorized app controls. This preparation does not launch the workflow.
