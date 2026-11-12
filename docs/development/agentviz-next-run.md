@@ -11,7 +11,7 @@ The executable schedule is `workflows/agentviz-next.plan.json`, named **AgentViz
 | S03 complete catalogue lookup | Implemented, awaiting board review | 6e5778 (plan card a40b39) | `6977d3e` | `npm test` 63/63, `npm run check` exit 0; see S03 below |
 | S04 agent lanes | Implemented, awaiting board review | c15df0 (plan card a40b39) | See `git log` on `task/c15df0` (commit titled "feat: show main and subagent lanes (S04)") | `npm test` 71/71, `npm run check` exit 0, local sample 24 families; see S04 below |
 | S05 explicit task progress | Implemented, awaiting board review | d5e522 (plan card a40b39) | See `git log` on `task/d5e522` (commit titled "feat: show progress from explicit agent task lists (S05)") | `npm test` 83/83, `npm run check` exit 0; no local list records exist, see S05 below |
-| S06 file footprint | Pending | Not allocated | None | Not run |
+| S06 file footprint | Implemented, awaiting board review | b43ef6 (plan card a40b39) | See `git log` on `task/b43ef6` (commit titled "feat: show a file activity footprint (S06)") | `npm test` 95/95, `npm run check` exit 0, local sample 40 + 40 transcripts; Codex not covered locally, see S06 below |
 | S07 AgentBoard entry command | Pending | Not allocated | None | Not run |
 | S08 reliability and cost | Pending | Not allocated | None | Not run |
 | S09 Windows acceptance | Pending | Not allocated | None | Not run |
@@ -396,4 +396,102 @@ Regressions added (12, all in `test/progress.test.js`): no list means no progres
 - Not run in a VS Code host. The narrow layout was not verified: headless Edge would not render below about 500 px, so that screenshot was discarded. S09 owns host acceptance.
 - Contrast and screen reader output were not measured. Linux and VSCodium were not run.
 
-Next action: board review of `task/d5e522`, then S06.
+Next action at the end of S05: board review of `task/d5e522`, then S06 (now done, below).
+
+## S06: Show a file activity footprint
+
+Owner: card `b43ef6`, branch `task/b43ef6`, AgentBoard worktree. Dependency commit: `82dbee6` (S05 integrated). Code commit: the commit on this branch titled "feat: show a file activity footprint (S06)". Review and integration: pending, done by the board.
+
+### Headline
+
+The footprint works on real Claude transcripts and agrees with the stations in every sampled session. **Two gaps:** every local Codex session reads "No file paths are recorded", because local Codex edits are program text inside `exec`; and subagent footprints are built by the parser but do not reach the view through the host yet.
+
+### Counting rule (one definition, stated in the panel)
+
+- Every recorded call counts once at its station, whatever its outcome. This is the S04 rule, unchanged.
+- A Files or Edits call either named a file through a recognized structured argument, or it did not.
+- **Files station = named read calls + Files calls naming no file. Edits station = named edit calls + Edits calls naming none.** Both sides are taken from the same retained events, so they cannot drift.
+- Per file: reads and edits are named calls not recorded as failed. A failed call is listed as failed. A call still waiting for its result counts as recorded.
+- A patch call naming several files is one call at the station and one edit for each distinct file.
+- The marker "EDITED 3+ TIMES" appears at three recorded, not failed, edits of one file.
+- A footprint belongs to one transcript. The followed session and each subagent lane are shown apart and never added together in the list.
+
+### Recognized structured file tools
+
+| Tool | Argument read | Counts as |
+| --- | --- | --- |
+| `Read`, `read_file`, `view_image` | `file_path`, `filePath` or `path` | read |
+| `Edit`, `Write`, `MultiEdit`, `edit_file`, `write_file` | the same keys | edit |
+| `NotebookEdit` | `notebook_path` | edit |
+| `apply_patch` (Codex custom or function call) | header lines `*** Update File:`, `*** Add File:`, `*** Delete File:`, `*** Move to:` at the start of a line | edit, per distinct file |
+
+Never read for file names: shell commands and their output, `exec` program text, tool results, file contents, patch bodies, prompts. `Grep`, `Glob` and listings name a folder or pattern, so they count as Files calls naming no single file.
+
+### What changed
+
+- `src/transcript.js`: `fileIdentity(path, cwd)`, `fileFootprint(events)`, `FOOTPRINT_FILES` (12). Each transcript state has an enumerable computed `footprint`: `{ files: [{ key, label, reads, edits, failed, shared }], total, reads, edits, readCalls, editCalls, unnamedReads, unnamedEdits, failedCalls, limit }`. It is computed from the retained events when a snapshot is taken. File identity rides on events as a host-only, non-enumerable field; events sent to the view still have exactly five fields. The recorded working directory is kept host-only to resolve relative paths.
+- `media/view.js`: `footprintFacts` and a "File activity" panel under Task list progress. The example session has a synthetic footprint counted from its own events.
+- `media/style.css`: the panel, list, marker, narrow and high-contrast rules. No inline styles; the CSP is unchanged.
+- `test/footprint.test.js`: new.
+- Not touched: `src/sessions.js`, `src/extension.js`, `media/app.js`, `src/webview.js`. The followed session's `footprint` reaches the view through the existing snapshot spread.
+
+### Behaviour
+
+- **Identity.** An opaque key `f:` plus 20 hex characters of a hash of the normalized path. Windows drive and UNC paths ignore case and separator style, and the `\\?\` prefixes; every other absolute path is POSIX and compared exactly. `.` and `..` are resolved. A relative path is joined to the recorded working directory; with none recorded it is its own identity and is not guessed to be an absolute one.
+- **Label.** At most the last two path segments, each cleaned like a saved title and cut to 40 characters. No drive, root, server or deeper folder. Escaped at the display boundary.
+- **Same label, different file.** Both rows stay, and each shows six characters of its key. `shared` is worked out across all retained files, not only the listed ones.
+- **Ranked list.** By edits, then reads, then failed, then label. Twelve files are sent; the panel says how many more are counted but not listed.
+- **Duplicates.** A repeated call record is counted once (existing call-ID rule).
+- **Missing or unusable paths** (absent, empty, not a string, over 2,048 characters, containing a control character) name no file. They stay in the station count and in "named no single file".
+- **Retention.** Counts follow the retained 10,000 events exactly. The panel says how many earlier events are outside retained history.
+- **Empty state.** "No file paths are recorded in the retained history of this transcript." The generic event labels ("Reading files", "Editing files") are unchanged.
+- **Coverage statement**, always shown: recognized structured file tools, retained history of this transcript, shell and program text not seen, labels are two segments.
+- **Mismatch guard.** If a footprint does not add up to the events it is shown with, the panel says so.
+
+### Checks (worktree, PowerShell 7, Node v26.7.0)
+
+| Command | Result |
+| --- | --- |
+| `node --test test/footprint.test.js` with the 12 new tests, before the implementation | exit 1: 12 tests, 0 pass, 12 fail |
+| `npm test` on this branch | exit 0: 95 tests, 95 pass, 0 fail |
+| `npm run check` on this branch | exit 0 |
+
+Regressions added (12, all in `test/footprint.test.js`): repeated reads and edits, ranking and the three-edit marker; duplicate call records for both providers; failed and pending calls, and a call that fails later; Windows, UNC, long-path-prefix, relative and Unix forms, case rules and hostile labels; two files with one label and the key fragment; missing and unusable paths, searches, shell and program text, and the empty state; patch headers, body decoys, a multi-file patch and the JSON-argument form; retention truncation and the twelve-file list; child attribution in the parser and separate lanes in the view, including "not loaded"; agreement with the station totals, the stated rule and the mismatch guard; the real host reader forwarding a footprint from a file with five-field events and no working directory; the example footprint, family-wide agreement and the stylesheet rules. Each test checks the `PRIVATE_` sentinels (paths above two segments, file bodies, patch bodies, code, commands, output) are absent from the state and the page.
+
+### Local compatibility sample (2026-11-12, counts only, read-only)
+
+No label, key, path or payload was printed or saved. The scripts were temporary and are not committed. The 40 newest transcripts under 40 MB of each provider were read to the end with the real `TranscriptReader` and checked with the real view.
+
+| | Claude | Codex |
+| --- | --- | --- |
+| Transcripts read / unreadable | 40 / 0 | 40 / 0 |
+| With at least one named file | 38 | 0 |
+| Distinct files | 468 | 0 |
+| Named read calls / named edit calls | 466 / 812 | 0 / 0 |
+| Files calls naming no file / Edits calls naming none | 304 / 0 | 5 / 196 |
+| Failed named calls | 1 | 0 |
+| Listed files with the three-edit marker / sharing a label | 94 / 8 | 0 / 0 |
+| Transcripts where footprint and stations disagree | 0 | 0 |
+| Labels with a drive, root or more than two segments; malformed keys; snapshots with extra event or path fields | 0; 0; 0 | 0; 0; 0 |
+
+Codex call shapes in those 40 rollouts (names and booleans only): 196 `exec` calls whose program text calls `tools.apply_patch(`, none with a patch header at the start of a line; 5 `exec` calls calling `tools.view_image(`. No structured `apply_patch`, `read_file` or `view_image` call.
+
+### Evidence
+
+`artifacts/s06/` in this worktree (git-ignored, local only): `footprint-synthetic.html` and `footprint-synthetic-desktop.png` (example session, real view and stylesheet, headless Edge, 1280 px), `footprint-synthetic.txt` (the panel text and the main-lane sums), `local-compatibility-sample.txt` (the counts above).
+
+### Gaps and limits
+
+- **Codex is not covered on this machine.** Local Codex edits and image reads are JavaScript program text inside `exec`. That text is not a structured file argument, so it is counted as "named no file" and never parsed, as in S05. The structured `apply_patch` parser is tested on synthetic records only.
+- **Subagent footprints do not reach the view in the host.** The parser builds one per transcript and the view draws `lane.footprint`, but lanes are built in `src/sessions.js`, which this step does not own. Until a later step adds `footprint: fileFootprint(own)` to the lane there, the panel says "File activity of the N subagent lanes is not loaded in this view" and that the stations also count those lanes. So with subagent lanes, the list covers the main lane while the Files and Edits stations cover the family; the panel's "Of its N Files calls" line is for the main lane only. Child attribution is tested in the parser and with synthetic lanes.
+- When that wiring is added, a lane sends only its newest 2,000 events while its footprint would cover all of its own retained events; the mismatch guard is not applied to lane lines.
+- The existing event labels ("Reading src/a.js") were not changed. They still take the last two segments without the new cleaning, and a shell event still shows the command's first word.
+- A relative path recorded before any working directory, and a Git Bash form such as `/c/Users/...`, get a different key from the same file's Windows path.
+- Windows case folding uses JavaScript lower-casing, not the file system's own table. Symlinks, junctions and 8.3 short names are not resolved; nothing touches the disk.
+- A file that was moved or renamed is two files. A deleted file is listed as edited.
+- "Read" means a read call was recorded, not that the whole file was read. A failed result recorded as text without an error flag counts as a read or edit.
+- The key is a truncated hash of a local path. It is opaque but could be matched by someone who already knows the path.
+- Not run in a VS Code host. Drawn in headless Edge at 1280 px only; the narrow rule is in the stylesheet and untested in a browser. S09 owns host acceptance.
+- Contrast and screen reader output were not measured. Linux and VSCodium were not run.
+
+Next action: board review of `task/b43ef6`, then S07.

@@ -31,6 +31,109 @@ function workspaceIdentity(cwd) {
   return { key: `ws:${createHash('sha256').update(normal).digest('hex').slice(0, 20)}`, segments, windows };
 }
 
+// File activity footprint (S06). Counting rule, shared with the stations:
+//   Every recorded call counts once at its station, whatever its outcome. A Files or Edits call that names a file
+//   through a recognized structured argument is a "named" call; every other Files or Edits call names no file.
+//   So: Files station = readCalls + unnamedReads, and Edits station = editCalls + unnamedEdits, for the same events.
+//   Per file: reads and edits are the named calls not recorded as failed; failed calls are counted as failed.
+//   A patch call that names several files is one call at the station and one edit for each distinct file.
+// Recognized arguments: file_path, filePath, path or notebook_path of Read, read_file, view_image, Edit, Write,
+// MultiEdit, NotebookEdit, edit_file, write_file, and the "*** Update/Add/Delete File:" and "*** Move to:" header
+// lines of an apply_patch call. Searches and listings name a folder or pattern, not one file. Shell commands,
+// program text, tool output, file contents and patch bodies are never read for file names.
+// Kept per file: an opaque key and a label of at most the last two path segments. The path stays in the host.
+// WARNING: bounded list; only this many ranked files are sent to the view, and the view says how many are not.
+const FOOTPRINT_FILES = 12;
+const PATH_LENGTH = 2048;
+const PATCH_FILES = 50;
+const READ_TOOLS = /^(read|read_file|view_image)$/;
+const EDIT_TOOLS = /^(edit|write|multiedit|edit_file|write_file|notebookedit)$/;
+const absoluteWindows = value => /^[a-z]:(?:[\\/]|$)/i.test(value) || value.startsWith('\\\\');
+// One path segment as display text: cleaned like a saved title, and cut short.
+const labelPart = value => {
+  const characters = [...sessionTitle(value)];
+  return characters.length > 40 ? characters.slice(0, 39).join('') + '\u2026' : characters.join('');
+};
+
+// One identity per file. Windows drive and UNC paths compare without case or separator differences; any other
+// absolute path is POSIX and compared exactly. A relative path is resolved against the recorded working directory
+// when there is one; without it the relative path is its own identity and is never guessed to be an absolute one.
+// Returns null for anything that is not one usable path.
+function fileIdentity(value, cwd) {
+  if (typeof value !== 'string' || !value.trim() || value.length > PATH_LENGTH || /[\x00-\x1f]/.test(value)) return null;
+  let text = value.trim().replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\/, '');
+  let form = absoluteWindows(text) ? 'win' : text.startsWith('/') ? 'posix' : 'rel';
+  if (form === 'rel' && typeof cwd === 'string' && cwd.length <= PATH_LENGTH && !/[\x00-\x1f]/.test(cwd)) {
+    const base = cwd.trim().replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\/, '');
+    if (absoluteWindows(base)) { form = 'win'; text = `${base}\\${text}`; }
+    else if (base.startsWith('/')) { form = 'posix'; text = `${base}/${text.replace(/\\/g, '/')}`; }
+  }
+  const unc = form === 'win' && text.startsWith('\\\\');
+  const segments = [];
+  for (const part of (form === 'posix' ? text : text.replace(/\\/g, '/')).split('/')) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      // A drive or the root is never climbed past; a relative path keeps the steps it cannot resolve.
+      if (segments.length && segments.at(-1) !== '..' && !/^[a-z]:$/i.test(segments.at(-1))) segments.pop();
+      else if (form === 'rel') segments.push(part);
+    }
+    else segments.push(part);
+  }
+  const named = segments.filter(part => !/^[a-z]:$/i.test(part) && part !== '..');
+  if (!named.length) return null;
+  const normal = form === 'win' ? `win:${unc ? '//' : ''}${segments.join('/').toLowerCase()}` : form === 'posix' ? `posix:/${segments.join('/')}` : `rel:${segments.join('/')}`;
+  const label = named.slice(-2).map(labelPart).filter(Boolean).join('/');
+  return { key: `f:${createHash('sha256').update(normal).digest('hex').slice(0, 20)}`, label: label || 'Unnamed file' };
+}
+
+// The files one structured call names. Only the argument keys and patch header lines listed above are looked at.
+function fileTargets(name, input, cwd) {
+  const lower = (shortName(name).split(/__|\./).at(-1) || '').toLowerCase();
+  const args = input && typeof input === 'object' ? input : {};
+  if (lower === 'apply_patch') {
+    const patch = typeof input === 'string' ? input : typeof args.input === 'string' ? args.input : typeof args.patch === 'string' ? args.patch : '';
+    const found = new Map();
+    // A header starts its line; every body line of a patch starts with a space, + or -.
+    for (const match of patch.matchAll(/^\*\*\* (?:(?:Update|Add|Delete) File|Move to): (.+)$/gm)) {
+      const identity = fileIdentity(match[1], cwd);
+      if (identity && !found.has(identity.key)) found.set(identity.key, identity);
+      if (found.size >= PATCH_FILES) break;
+    }
+    return [...found.values()];
+  }
+  if (!READ_TOOLS.test(lower) && !EDIT_TOOLS.test(lower)) return [];
+  const identity = fileIdentity(args.file_path ?? args.filePath ?? args.notebook_path ?? args.path, cwd);
+  return identity ? [identity] : [];
+}
+
+// Built from normalized events, so it always describes exactly the events it is shown with: retained history
+// only, and the current outcome of each call. Events of other kinds are ignored.
+function fileFootprint(events) {
+  const files = new Map();
+  const totals = { total: 0, reads: 0, edits: 0, readCalls: 0, editCalls: 0, unnamedReads: 0, unnamedEdits: 0, failedCalls: 0 };
+  for (const event of Array.isArray(events) ? events : []) {
+    if (event?.kind !== 'files' && event?.kind !== 'edits') continue;
+    const reading = event.kind === 'files';
+    const targets = Array.isArray(event.files) ? event.files : [];
+    if (!targets.length) { totals[reading ? 'unnamedReads' : 'unnamedEdits']++; continue; }
+    totals[reading ? 'readCalls' : 'editCalls']++;
+    const failed = event.outcome === 'error';
+    if (failed) totals.failedCalls++;
+    for (const target of targets) {
+      let entry = files.get(target.key);
+      if (!entry) files.set(target.key, entry = { key: target.key, label: target.label, reads: 0, edits: 0, failed: 0, shared: false });
+      if (failed) entry.failed++;
+      else { entry[reading ? 'reads' : 'edits']++; totals[reading ? 'reads' : 'edits']++; }
+    }
+  }
+  const labels = new Map();
+  for (const entry of files.values()) labels.set(entry.label, (labels.get(entry.label) || 0) + 1);
+  for (const entry of files.values()) entry.shared = labels.get(entry.label) > 1;
+  totals.total = files.size;
+  const ranked = [...files.values()].sort((a, b) => b.edits - a.edits || b.reads - a.reads || b.failed - a.failed || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0) || (a.key < b.key ? -1 : 1));
+  return { files: ranked.slice(0, FOOTPRINT_FILES), ...totals, limit: FOOTPRINT_FILES };
+}
+
 function describeTool(name, input) {
   const tool = shortName(name).split(/__|\./).at(-1) || 'Tool';
   const lower = tool.toLowerCase();
@@ -69,6 +172,11 @@ function createSession(provider, id) {
   // progress stays null until this transcript records an explicit task list (S05). It is never derived from events.
   const state = { provider, id, project: '', parent: null, events: [], status: 'unknown', context: null, progress: null, updatedAt: 0, startedAt: 0, invalidLines: 0, oversizedLines: 0, droppedEvents: 0 };
   Object.defineProperties(state, {
+    // File activity (S06): computed from the retained events whenever a snapshot is taken, so it is part of what
+    // the host forwards and can never disagree with the events sent beside it.
+    footprint: { enumerable: true, get: () => fileFootprint(state.events) },
+    // Host only (S06): the recorded working directory, used to resolve relative file paths. Never sent.
+    cwd: { value: '', writable: true },
     // Host only (S05): calls waiting for their result, calls already applied, and the list being built.
     tasks: { value: { pending: new Map(), done: new Map(), items: new Map(), source: '', omitted: 0, unread: 0, unmatched: 0, unreadable: 0, updatedAt: 0 } },
     calls: { value: new Map() },
@@ -247,6 +355,11 @@ function marker(state, time, kind, id, label) {
 function startTool(state, time, id, name, input) {
   if (typeof id !== 'string' || !id || typeof name !== 'string' || state.calls.has(id)) return;
   const event = { id: shortName(id), time, ...describeTool(name, input), outcome: 'running' };
+  if (event.kind === 'files' || event.kind === 'edits') {
+    // Host only: the event sent to the view keeps its five fields; file identity travels in the footprint.
+    const files = fileTargets(name, input, state.cwd);
+    if (files.length) Object.defineProperty(event, 'files', { value: files });
+  }
   state.calls.set(id, event);
   push(state, event);
   state.status = 'active';
@@ -274,7 +387,7 @@ function applyRecord(state, record) {
     if (!state.startedAt || time < state.startedAt) state.startedAt = time;
   }
   if (state.provider === 'claude') {
-    if (typeof record.cwd === 'string') state.project = projectName(record.cwd);
+    if (typeof record.cwd === 'string') { state.project = projectName(record.cwd); state.cwd = record.cwd; }
     // A subagent transcript names itself and the session it belongs to on its own records.
     if (!state.parent && record.agentId === state.id && typeof record.sessionId === 'string' && record.sessionId !== state.id) state.parent = shortName(record.sessionId);
     if (!validTime) return;
@@ -309,7 +422,7 @@ function applyRecord(state, record) {
   if (!payload || typeof payload !== 'object') return;
   if (record.type === 'session_meta') {
     if (typeof payload.id === 'string' && payload.id !== state.id) return;
-    if (typeof payload.cwd === 'string') state.project = projectName(payload.cwd);
+    if (typeof payload.cwd === 'string') { state.project = projectName(payload.cwd); state.cwd = payload.cwd; }
     const spawn = payload.source?.subagent?.thread_spawn;
     if (typeof spawn?.parent_thread_id === 'string') state.parent = shortName(spawn.parent_thread_id);
     // Verified local shape (2026-11-12): a child rollout stores a short generated nickname and an optional role.
@@ -368,4 +481,4 @@ function applyRecord(state, record) {
   }
 }
 
-module.exports = { createSession, applyRecord, describeTool, projectName, sessionTitle, workspaceIdentity, MAX_EVENTS, LIFECYCLE_LIMIT, PROGRESS_ITEMS, UNNAMED_SESSION };
+module.exports = { createSession, applyRecord, describeTool, fileIdentity, fileFootprint, FOOTPRINT_FILES, projectName, sessionTitle, workspaceIdentity, MAX_EVENTS, LIFECYCLE_LIMIT, PROGRESS_ITEMS, UNNAMED_SESSION };

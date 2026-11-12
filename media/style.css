@@ -111,3 +111,14 @@ footer { font-size: 10px; color: var(--muted); margin-top: 16px; }
 @media (max-width: 480px) { .brand { width: 100%; }.finder { grid-template-columns: 1fr; }.field-action button { width: 100%; }.session-heading { flex-direction: column; gap: 12px; }.timeline-labels > span:nth-child(2) { display: none; }.lane { grid-template-columns: 1fr; row-gap: 4px; }.lane-facts { grid-column: 1; }.panel-heading > span { font-size: 8px; }.station-totals { gap: 10px 14px; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 body.vscode-high-contrast .panel, body.vscode-high-contrast-light .panel { border-color: var(--fg); }
+
+/* File activity footprint (S06). */
+.footprint-block { padding: 16px 20px; }.footprint-block p { margin: 0 0 6px; }
+.file-list { list-style: none; margin: 4px 0 10px; padding: 0; }
+.file-list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; border-top: 1px solid var(--line); padding: 6px 0; font-size: 12px; }
+.file-label { font-family: var(--vscode-editor-font-family, monospace); overflow-wrap: anywhere; }
+.file-counts { color: var(--muted); font-size: 11px; margin-left: auto; white-space: nowrap; }
+.file-hot { border: 1px solid var(--shell); border-radius: 3px; color: var(--shell); font-size: 9px; letter-spacing: .08em; padding: 1px 5px; white-space: nowrap; }
+.footprint-rule, .footprint-source, .footprint-order { font-size: 11px; overflow-wrap: anywhere; }.footprint-gap { font-size: 12px; border-left: 2px solid var(--shell); padding-left: 8px; }
+body.vscode-high-contrast .file-hot, body.vscode-high-contrast-light .file-hot { border-color: var(--fg); color: var(--fg); }
+@media (max-width: 480px) { .file-counts { margin-left: 0; width: 100%; white-space: normal; } }

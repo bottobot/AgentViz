@@ -315,6 +315,82 @@
       ${progressBody(facts, session.status)}${below ? `<div class="progress-subagents">${below}</div>` : ''}</div><!-- /progress -->`;
   }
 
+  // File activity footprint (S06). The host builds it from the same retained events the stations count, under one
+  // rule: every recorded call counts once at its station; a Files or Edits call either named a file through a
+  // recognized structured file tool or it did not. Files station = named read calls + calls naming no file, and
+  // the same for Edits. Per file, a call recorded as failed is shown as failed, not as a read or an edit.
+  // A footprint belongs to one transcript, so the followed session and each subagent lane are shown apart.
+  const HOT_EDITS = 3;
+  const footprintTools = 'Read, Edit, Write, MultiEdit, NotebookEdit, read_file, edit_file, write_file, view_image and the file headers of apply_patch';
+
+  function footprintFacts(footprint, events) {
+    const listed = Boolean(footprint) && typeof footprint === 'object';
+    const whole = value => listed && Number.isInteger(value) && value > 0 ? value : 0;
+    const files = (listed && Array.isArray(footprint.files) ? footprint.files : [])
+      .filter(file => file && typeof file === 'object' && typeof file.key === 'string' && typeof file.label === 'string')
+      .map(file => ({ key: file.key, label: file.label, reads: Number.isInteger(file.reads) && file.reads > 0 ? file.reads : 0, edits: Number.isInteger(file.edits) && file.edits > 0 ? file.edits : 0,
+        failed: Number.isInteger(file.failed) && file.failed > 0 ? file.failed : 0, shared: file.shared === true }));
+    const uses = new Map();
+    for (const file of files) uses.set(file.label, (uses.get(file.label) || 0) + 1);
+    for (const file of files) { file.shared = file.shared || uses.get(file.label) > 1; file.hot = file.edits >= HOT_EDITS; }
+    const facts = { loaded: listed, files, total: Math.max(whole(footprint?.total), files.length), reads: whole(footprint?.reads), edits: whole(footprint?.edits),
+      readCalls: whole(footprint?.readCalls), editCalls: whole(footprint?.editCalls), unnamedReads: whole(footprint?.unnamedReads), unnamedEdits: whole(footprint?.unnamedEdits), failedCalls: whole(footprint?.failedCalls) };
+    facts.stationReads = 0;
+    facts.stationEdits = 0;
+    for (const event of Array.isArray(events) ? events : []) {
+      if (event?.kind === 'files') facts.stationReads++;
+      else if (event?.kind === 'edits') facts.stationEdits++;
+    }
+    facts.agrees = facts.readCalls + facts.unnamedReads === facts.stationReads && facts.editCalls + facts.unnamedEdits === facts.stationEdits;
+    return facts;
+  }
+
+  const footprintHead = facts => `${plural(facts.total, 'file')} · ${plural(facts.reads, 'read')} · ${plural(facts.edits, 'edit')}`;
+  const fileLabel = file => `<span class="file-label">${escape(file.label)}</span>${file.shared ? ` <span class="lane-id">${escape(file.key.slice(2, 8))}</span>` : ''}`;
+
+  function footprintBody(facts, dropped) {
+    const coverage = `<p class="muted footprint-source">${escape(`Covers recognized structured file tools (${footprintTools}) in the retained history of this transcript. Files touched by shell commands, searches or program text are not seen. A label is at most the last two segments of a path; full paths stay in the extension host.`)}</p>`;
+    const outside = dropped ? `<p class="muted footprint-gap" role="status">${escape(`${plural(dropped, 'earlier event')} ${dropped === 1 ? 'is' : 'are'} outside retained history and ${dropped === 1 ? 'is' : 'are'} not counted here.`)}</p>` : '';
+    let rule = '';
+    if (facts.stationReads || facts.stationEdits) {
+      const parts = [];
+      if (facts.stationReads) parts.push(`Of its ${plural(facts.stationReads, 'Files call')}, ${facts.readCalls} named one file and ${facts.unnamedReads} named no single file (searches, listings, code calls or a missing path).`);
+      if (facts.stationEdits) parts.push(`Of its ${plural(facts.stationEdits, 'Edits call')}, ${facts.editCalls} named a file and ${facts.unnamedEdits} named none.`);
+      parts.push('A failed call counts at its station and is listed as failed, not as a read or an edit. A patch that names several files counts once at the station and once for each file.');
+      rule = `<p class="muted footprint-rule">${escape(parts.join(' '))}</p>`;
+    }
+    const mismatch = facts.loaded && !facts.agrees ? '<p class="footprint-gap" role="status">These file counts do not match the station totals for this lane; the two were not taken from the same records.</p>' : '';
+    if (!facts.loaded) return `<p class="muted">File activity was not sent for this transcript.</p>${coverage}`;
+    if (!facts.files.length) return `<p class="muted">No file paths are recorded in the retained history of this transcript.</p>${rule}${mismatch}${outside}${coverage}`;
+    const rows = facts.files.map(file => `<li>${fileLabel(file)}<span class="file-counts">${plural(file.reads, 'read')} · ${plural(file.edits, 'edit')}${file.failed ? ` · ${file.failed} failed` : ''}</span>${file.hot ? `<span class="file-hot">EDITED ${HOT_EDITS}+ TIMES</span>` : ''}</li>`).join('');
+    const more = facts.total - facts.files.length;
+    const shared = facts.files.some(file => file.shared) ? '<p class="muted">Different files with the same short label are told apart by the code after the label.</p>' : '';
+    return `<ol class="file-list">${rows}</ol>
+      <p class="muted footprint-order">Ranked by recorded edits, then reads.${more > 0 ? ` ${more} more ${more === 1 ? 'file is' : 'files are'} not listed; the totals above include ${more === 1 ? 'it' : 'them'}.` : ''} A file is marked after ${HOT_EDITS} recorded edits.</p>${shared}${rule}${mismatch}${outside}${coverage}`;
+  }
+
+  // One line for a subagent lane's own footprint.
+  function footprintLine(facts) {
+    if (!facts.files.length) return `No file paths are recorded in the retained history of this transcript.${facts.unnamedReads + facts.unnamedEdits ? ` ${plural(facts.unnamedReads + facts.unnamedEdits, 'file tool call')} named no file.` : ''}`;
+    const top = facts.files[0];
+    const hot = facts.files.filter(file => file.hot).length;
+    return `${footprintHead(facts)} · ${top.edits ? 'Most edited' : 'Most read'}: ${fileLabel(top)}${hot ? ` · <span class="file-hot">${plural(hot, 'file')} EDITED ${HOT_EDITS}+ TIMES</span>` : ''}`;
+  }
+
+  function footprintPanel(session, lanes) {
+    const facts = footprintFacts(session.footprint, session.events);
+    const children = lanes.slice(1).filter(lane => !lane.missing);
+    const loaded = children.filter(lane => 'footprint' in lane);
+    let below = '';
+    if (loaded.length) below += `<p class="muted">Subagent lanes are counted apart. A file call belongs to the agent that made it and is not added to the list above.</p>
+      <ul class="progress-lanes">${loaded.map(lane => `<li><span aria-hidden="true">↳ </span><b>${escape(laneName(lane))}</b> <span class="lane-id">${escape(String(lane.key).slice(0, 8))}</span><span class="progress-lane-facts">${footprintLine(footprintFacts(lane.footprint, lane.events))}</span></li>`).join('')}</ul>`;
+    const unloaded = children.length - loaded.length;
+    if (unloaded) below += `<p class="muted">File activity of the ${unloaded} subagent ${unloaded === 1 ? 'lane' : 'lanes'} is not loaded in this view. The list above covers the ${lanes[0].role === 'subagent' ? 'followed subagent' : 'main session'} only; the Files and Edits stations also count the subagent lanes.</p>`;
+    return `<div class="footprint-block panel"><div class="context-title"><h2>File activity</h2><span>${facts.files.length ? escape(footprintHead(facts).toUpperCase()) : 'NO FILE PATHS'}</span></div>
+      <p class="muted progress-owner">${lanes[0].role === 'subagent' ? 'Followed subagent' : 'Main session'}</p>
+      ${footprintBody(facts, session.droppedEvents)}${below ? `<div class="footprint-subagents progress-subagents">${below}</div>` : ''}</div><!-- /footprint -->`;
+  }
+
   // Navigation (S02). These work on the catalogue the host sends; they never see paths or transcript content.
   const needle = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
   const providerName = provider => provider === 'claude' ? 'Claude' : 'Codex';
@@ -408,12 +484,13 @@
       <div class="context-block panel"><div class="context-title"><h2>Context window</h2><span>${context === null ? 'Unavailable' : `${session.context}%`}</span></div>
         ${context === null ? '<p class="muted">This source has not reported usage and capacity.</p>' : `<meter min="0" max="100" low="70" high="90" optimum="0" value="${context}" aria-label="Context window usage">${context}%</meter><p class="muted">Reported by the session. Amber at 70%, red at 90%.</p>`}</div>
       ${progressPanel(session, lanes)}
+      ${footprintPanel(session, lanes)}
       <div class="recent-panel panel"><div class="panel-heading"><h2>Recent activity</h2><span>SIMILAR EVENTS FOLDED</span></div><ol>${recent(events) || '<li class="muted">No tool activity recorded yet.</li>'}</ol></div>
-      <p class="privacy-note">Names only. Prompts, command arguments and tool output stay out of this view. Task list labels appear only under Task list progress.</p></section></div>
+      <p class="privacy-note">Names only. Prompts, command arguments and tool output stay out of this view. Task list labels appear only under Task list progress. File labels are at most the last two segments of a path.</p></section></div>
       ${lanesPanel(lanes, session.family)}
       <section class="timeline-panel panel"><div class="panel-heading"><h2>Activity over time</h2><span>LAST 30 MINUTES · 30s PER BAR · ${escape(scope.toUpperCase())}</span></div>${timeline(events, now)}
       <div class="timeline-labels"><span>${clock(Math.floor(now / 30000) * 30000 - 59 * 30000)}</span><span>Gaps = silence <i class="legend-error"></i> tool error <i class="legend-marker"></i> turn / compaction</span><span>Now</span></div></section>
-      <footer>Counts cover loaded, retained history of the ${escape(scope)}. Stations, totals, lanes and the strip count each call once, in the lane of the agent that made it; starting a subagent counts in the parent's lane. The strip shows 30 minutes. Quiet means no recent records; it does not prove the agent stopped.</footer>`;
+      <footer>Counts cover loaded, retained history of the ${escape(scope)}. Stations, totals, lanes and the strip count each call once, in the lane of the agent that made it; starting a subagent counts in the parent's lane. File activity lists files named by recognized structured file tools in retained history, one lane at a time. The strip shows 30 minutes. Quiet means no recent records; it does not prove the agent stopped.</footer>`;
   }
 
   function demoSession(now = Date.now()) {
@@ -439,10 +516,29 @@
     // Made-up task lists: one for the main session, one for a subagent, kept apart.
     const list = (source, updatedAt, rows) => ({ source, items: rows.map(([status, label], index) => ({ id: String(index + 1), status, label })), omitted: 0, unread: 0, unmatched: 0, unreadable: 0, updatedAt });
     const progress = list('claude-tasks', start + 14 * 60000, [['completed', 'Read the session reader'], ['completed', 'Add the example fixture'], ['in_progress', 'Run the test suite'], ['pending', 'Update the notes'], ['pending', 'Package the extension']]);
+    // Made-up file activity, counted from the made-up events above under the same rule as the stations.
+    const footprint = laneEvents => {
+      const files = new Map();
+      const totals = { reads: 0, edits: 0, readCalls: 0, editCalls: 0, unnamedReads: 0, unnamedEdits: 0, failedCalls: 0 };
+      for (const event of laneEvents) {
+        if (event.kind !== 'files' && event.kind !== 'edits') continue;
+        const reading = event.kind === 'files';
+        const name = event.label.split(' ')[1];
+        if (!name || !name.includes('.')) { totals[reading ? 'unnamedReads' : 'unnamedEdits']++; continue; }
+        totals[reading ? 'readCalls' : 'editCalls']++;
+        const entry = files.get(name) || { key: `f:demo${String(files.size).padStart(16, '0')}`, label: name, reads: 0, edits: 0, failed: 0, shared: false };
+        files.set(name, entry);
+        if (event.outcome === 'error') { entry.failed++; totals.failedCalls++; }
+        else { entry[reading ? 'reads' : 'edits']++; totals[reading ? 'reads' : 'edits']++; }
+      }
+      const ranked = [...files.values()].sort((a, b) => b.edits - a.edits || b.reads - a.reads || a.label.localeCompare(b.label));
+      return { files: ranked, total: ranked.length, ...totals, limit: 12 };
+    };
+    for (const row of lanes.slice(1)) row.footprint = footprint(row.events);
     lanes[1].progress = list('claude-todos', start + 8 * 60000, [['completed', 'Find the readers'], ['completed', 'Summarise the call sites']]);
     lanes[2].progress = null;
     lanes[3].progress = null;
-    return { provider: 'claude', id: 'example-session', project: 'AgentViz', parent: null, events, updatedAt: events.at(-1).time, startedAt: start, status: 'active', context: 66, progress, invalidLines: 0, oversizedLines: 0, droppedEvents: 0,
+    return { provider: 'claude', id: 'example-session', project: 'AgentViz', parent: null, events, updatedAt: events.at(-1).time, startedAt: start, status: 'active', context: 66, progress, footprint: footprint(events), invalidLines: 0, oversizedLines: 0, droppedEvents: 0,
       family: { lanes, found: 3, limit: 24, eventLimit: 2000, notes: [] } };
   }
 
@@ -465,7 +561,7 @@
     }));
   }
 
-  const api = { summarize, activityBuckets, render, demoSession, progressFacts, familyLanes, familyEvents, laneCounts, laneFacts, laneAxis, demoCatalogue, demoIdentity, filterSessions, navigate, workspaceChoices, idLabels, sessionLabel };
+  const api = { summarize, activityBuckets, render, demoSession, progressFacts, footprintFacts, familyLanes, familyEvents, laneCounts, laneFacts, laneAxis, demoCatalogue, demoIdentity, filterSessions, navigate, workspaceChoices, idLabels, sessionLabel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.AgentViz = api;
 })(typeof globalThis === 'undefined' ? this : globalThis);
