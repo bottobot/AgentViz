@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentViz Mixing Console</title>
+<link rel="stylesheet" href="console.css">
+</head>
+<body>
+<div class="desk">
+  <div class="cheek left" aria-hidden="true"></div>
+  <main class="panel">
+    <header class="bridge">
+      <div class="brand"><b>AGENTVIZ</b><span>SC-07 session console</span></div>
+      <div class="lcd session" id="session" data-open="session" tabindex="0" role="button" aria-label="Session identity">
+        <div class="s1" id="s1"></div>
+        <div class="s2" id="s2"></div>
+      </div>
+      <div class="status-block" data-open="session" tabindex="0" role="button" aria-label="Session status">
+        <span class="led big" id="statusLed"></span>
+        <div><div id="statusTxt" class="engr"></div><div id="statusSub" class="engr small"></div></div>
+      </div>
+      <div class="transport">
+        <button class="hw" data-act="pause" id="pauseBtn" title="Pause or resume the session (Space)">PAUSE</button>
+        <div class="speeds" role="group" aria-label="Speed">
+          <button class="hw sp" data-act="speed" data-v="0.5">0.5x</button>
+          <button class="hw sp on" data-act="speed" data-v="1">1x</button>
+          <button class="hw sp" data-act="speed" data-v="2">2x</button>
+          <button class="hw sp" data-act="speed" data-v="4">4x</button>
+        </div>
+        <div class="lcd mode" id="mode" aria-live="polite"></div>
+      </div>
+    </header>
+
+    <div class="work">
+      <div class="leftcol">
+        <section class="patchbay" aria-label="Patch bay: every flow hop is a cable from its source jack to its destination jack">
+          <svg id="bay" role="img" aria-label="Patch bay"></svg>
+        </section>
+        <section class="strips" id="strips" aria-label="Channel strips">
+          <div class="kinds" id="kindStrips"></div>
+          <div class="lanes" id="laneStrips"><div class="lanes-empty engr small">LANE EXPANDER<br>subagent strips appear here when spawned</div></div>
+          <div class="master" id="master"></div>
+        </section>
+      </div>
+
+      <aside class="rack" id="rack">
+        <div class="rack-scroll">
+          <h2 class="rack-h">OUTPUT METERS <small>where data ends up</small></h2>
+          <div id="buses"></div>
+          <h2 class="rack-h">DISK <small>per file: reads, edits, failed, lines</small></h2>
+          <div id="files" class="files"></div>
+          <h2 class="rack-h">ACTIVITY LOG <small>repeats folded</small></h2>
+          <div id="activity" class="activity"></div>
+        </div>
+        <div class="insp" id="insp" hidden tabindex="-1" role="dialog" aria-label="Channel inspector">
+          <div class="insp-head"><span class="engr">CHANNEL INSPECTOR</span><button class="hw small" data-act="close" title="Close (Esc)">CLOSE</button></div>
+          <div class="insp-body" id="inspBody"></div>
+        </div>
+      </aside>
+    </div>
+
+    <section class="tapedeck" aria-label="Multitrack tape: the last 30 minutes">
+      <div class="reels" id="reels" aria-hidden="true">
+        <svg viewBox="0 0 120 64"><g class="reel r1"><circle cx="30" cy="30" r="25"/><circle cx="30" cy="30" r="6" class="hub"/><path d="M30 8v14M30 38v14M8 30h14M38 30h14"/></g><g class="reel r2"><circle cx="90" cy="30" r="25"/><circle cx="90" cy="30" r="6" class="hub"/><path d="M90 8v14M90 38v14M68 30h14M98 30h14"/></g><path d="M30 55 L60 62 L90 55" class="tapepath"/></svg>
+        <div class="engr small">TAPE · 30 MIN</div>
+      </div>
+      <div class="tape-main">
+        <div class="tape-bar">
+          <button class="hw small" data-act="rew" data-v="-60000" title="Rewind one minute">&#9664;&#9664; 1m</button>
+          <button class="hw small" data-act="rew" data-v="-10000" title="Rewind ten seconds">&#9664; 10s</button>
+          <button class="hw small" data-act="rew" data-v="10000" title="Forward ten seconds">10s &#9654;</button>
+          <button class="hw small live" data-act="live" title="Return to live (End)">&#9679; LIVE</button>
+          <span class="engr small tape-help">Click or drag the tape to rewind and inspect that moment. Click a mark to open its call.</span>
+          <span class="lcd small" id="tapeTime"></span>
+        </div>
+        <div class="tape-wrap"><canvas id="tape" tabindex="0" role="slider" aria-label="Tape position. Left and right move, End returns to live, Enter opens the nearest call"></canvas></div>
+      </div>
+    </section>
+  </main>
+  <div class="cheek right" aria-hidden="true"></div>
+</div>
+<script src="../shared/sim.js"></script>
+<script src="console.js"></script>
+</body>
+</html>

@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Score</title>
+<link rel="stylesheet" href="score.css">
+</head>
+<body>
+<header id="top">
+  <div id="title" class="title" data-open="session" tabindex="0" role="button" aria-label="Session details">
+    <div class="work" id="work">Session</div>
+    <div class="sub" id="worksub">A session score</div>
+  </div>
+  <dl id="ident" class="ident"></dl>
+  <div class="controls" role="toolbar" aria-label="Playback">
+    <div id="mode" class="mode live" aria-live="polite">
+      <span class="mode-mark" aria-hidden="true">&#9679;</span><span id="mode-text">Live &middot; a tempo</span>
+    </div>
+    <button id="live-btn" class="btn" title="Return to live (L)">Return to live</button>
+    <button id="pause-btn" class="btn" title="Pause or resume (Space)" aria-pressed="false">Pause</button>
+    <div class="seg" id="speed" role="group" aria-label="Speed">
+      <button data-speed="0.5">&frac12;&times;</button><button data-speed="1" class="on">1&times;</button><button data-speed="2">2&times;</button><button data-speed="4">4&times;</button>
+    </div>
+    <div class="seg" role="group" aria-label="Zoom">
+      <button id="zoom-out" title="Zoom out">&minus;</button><button id="zoom-in" title="Zoom in">+</button>
+    </div>
+  </div>
+</header>
+
+<main id="score-wrap" tabindex="0" aria-label="Score. Shift + wheel or drag to scroll in time. Arrow keys move, L returns to live.">
+  <svg id="score" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Session score"></svg>
+</main>
+
+<footer id="overview-wrap">
+  <div class="ov-head"><span class="sc">Condensed score &middot; last 30 minutes</span><span class="ov-hint">click or drag to inspect a moment</span></div>
+  <svg id="overview" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Activity over the last 30 minutes"></svg>
+</footer>
+
+<aside id="margin" aria-label="Conductor's summary"></aside>
+
+<section id="panel" aria-label="Programme note" aria-hidden="true">
+  <div class="panel-bar">
+    <button id="panel-back" class="btn small" title="Back">&larr; Back</button>
+    <span class="sc">Programme note</span>
+    <button id="panel-close" class="btn small" title="Close (Esc)">&times;</button>
+  </div>
+  <div id="panel-body"></div>
+</section>
+
+<svg id="flights" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+
+<script src="../shared/sim.js"></script>
+<script src="score.js"></script>
+</body>
+</html>

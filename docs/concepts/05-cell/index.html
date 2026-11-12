@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Living Cell · AgentViz concept 05</title>
+<link rel="stylesheet" href="cell.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand">
+    <svg width="30" height="30" viewBox="0 0 30 30" aria-hidden="true"><circle cx="15" cy="15" r="12" fill="none" stroke="#ff3fb4" stroke-width="1.6"/><circle cx="13" cy="14" r="4.5" fill="rgba(182,255,74,.35)" stroke="#b6ff4a"/><circle cx="20" cy="20" r="1.6" fill="#ffb3d9"/><circle cx="9" cy="20" r="1.2" fill="#52f0dc"/><circle cx="21" cy="10" r="1.2" fill="#a78bff"/></svg>
+    <div><div class="eyebrow">Specimen · living cell · ×400</div><div class="title" id="hTitle">AgentViz</div></div>
+  </div>
+  <dl id="hFacts"></dl>
+  <div class="controls">
+    <button id="btnPause" type="button" title="Pause or resume the session (Space)">Pause</button>
+    <div class="speed" role="group" aria-label="Speed">
+      <button type="button" data-speed="0.5" aria-pressed="false">0.5×</button><button type="button" data-speed="1" aria-pressed="true">1×</button><button type="button" data-speed="2" aria-pressed="false">2×</button><button type="button" data-speed="4" aria-pressed="false">4×</button>
+    </div>
+    <button id="mode" type="button" class="live" title="Live or inspecting a moment">● LIVE</button>
+  </div>
+</header>
+<main id="grid">
+  <aside id="left" aria-label="Lab notebook">
+    <section class="sec"><h2>Culture · calls per kind <small>✶ = errors since prompt</small></h2><div id="counts"></div></section>
+    <section class="sec"><h2>Membrane · context <small><button class="lnk" data-open="context">what filled it</button></small></h2><div id="ctx"></div><canvas id="ctxSpark" aria-label="Context window history"></canvas><div id="ctxFiles"></div></section>
+    <section class="sec"><h2>Vacuole · task list <small><button class="lnk" data-open="tasks">open</button></small></h2><div id="tasks"></div></section>
+    <section class="sec"><h2>Colonies · file footprint <small>hot = 3+ edits</small></h2><div id="files"></div></section>
+  </aside>
+  <section id="stage" aria-label="Microscope view of the session">
+    <canvas id="scope" aria-label="Living cell: the session under a microscope. Use Tab to step through organelles, colonies, daughter cells and viruses; Enter opens a specimen slide."></canvas>
+    <div id="hitlayer"></div>
+    <div id="hint"><b>hover</b> to focus the reticle · <b>click</b> any organelle, molecule, colony, daughter cell or virus for its specimen slide</div>
+    <div id="legend"></div>
+  </section>
+  <section id="chartwrap" aria-label="Growth chart, last 30 minutes">
+    <h2>Growth chart · last 30 min</h2>
+    <div id="gkey"><span style="color:#ffb3d9">▼ prompt</span><span style="color:#b6ff4a">✓ turn done</span><span style="color:#ffae2b">◆ compaction</span><span style="color:#ff8796">✶ error</span><span>— context %</span></div>
+    <div id="gread"></div>
+    <canvas id="growth"></canvas>
+  </section>
+  <aside id="right" aria-label="Lineage and field notes">
+    <section class="sec lineage"><h2>Lineage · cell divisions <small id="laneNote"></small></h2><div id="lanes"></div></section>
+    <section class="sec activity"><h2>Field notes · recent activity <small>repeats folded ×N</small></h2><div id="activity"></div></section>
+    <div id="slide" hidden role="dialog" aria-label="Specimen slide">
+      <div class="slidebar"><button id="slideBack" type="button" title="Back">←</button><span class="eyebrow" id="slideTitle">Specimen slide</span><button id="slideClose" type="button" title="Close (Esc)">✕</button></div>
+      <div id="slideBody"></div>
+    </div>
+  </aside>
+</main>
+<script src="../shared/sim.js"></script>
+<script src="cell.js"></script>
+</body>
+</html>

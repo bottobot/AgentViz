@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token Watershed · AgentViz concept 02</title>
+<link rel="stylesheet" href="watershed.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand"><svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><path d="M2 9 C8 4, 12 14, 24 8 M2 15 C8 10, 14 20, 24 14 M2 21 C9 16, 15 25, 24 20" fill="none" stroke="#5fd8d2" stroke-width="2" stroke-linecap="round"/></svg>
+    <div><b>Token Watershed</b><small>AgentViz · concept 02</small></div></div>
+  <div id="ident" aria-live="off"></div>
+  <div class="controls">
+    <span id="mode" class="mode live" role="status">LIVE</span>
+    <button id="pause" type="button" aria-pressed="false" title="Pause or resume (P)">Pause</button>
+    <div class="speed" role="group" aria-label="Simulation speed">
+      <button type="button" data-speed="0.5">0.5×</button><button type="button" data-speed="1" aria-pressed="true">1×</button><button type="button" data-speed="2">2×</button><button type="button" data-speed="4">4×</button>
+    </div>
+  </div>
+</header>
+<main id="main">
+  <section id="mapwrap" aria-label="Watershed map: sources on the left, tool workings in the middle, basins on the right">
+    <svg id="map" viewBox="0 0 1200 720" preserveAspectRatio="xMidYMid meet"></svg>
+    <canvas id="fx" aria-hidden="true"></canvas>
+    <svg id="overlay" viewBox="0 0 1200 720" preserveAspectRatio="xMidYMid meet"></svg>
+  </section>
+  <aside id="side">
+    <nav id="tabs" role="tablist"></nav>
+    <div id="panel" role="tabpanel"></div>
+    <div id="drawer" aria-hidden="true" role="dialog" aria-label="Detail">
+      <div class="dhead"><button id="dback" type="button" title="Back">◂ Back</button><span id="dcrumb"></span><button id="dclose" type="button" title="Close (Esc)">✕</button></div>
+      <div id="dbody"></div>
+    </div>
+  </aside>
+</main>
+<footer id="history">
+  <div class="hhead"><b>History · last 30 minutes</b><span class="hnote">flow volume by kind (height ∝ √tokens) · context level · errors and markers · click a moment to inspect it</span><span id="hlegend"></span></div>
+  <svg id="hist" tabindex="0" aria-label="History band. Click or use arrow keys and Enter to inspect a moment."></svg>
+</footer>
+<script src="../shared/sim.js"></script>
+<script src="watershed.js"></script>
+</body>
+</html>

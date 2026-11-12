@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentViz Works</title>
+<link rel="stylesheet" href="factory.css">
+</head>
+<body>
+<header id="top">
+  <div class="brand">
+    <svg viewBox="0 0 28 28" width="26" height="26" aria-hidden="true"><path d="M2 26V12l7 4V12l7 4V8l10 6v12z" fill="#f26b1d" stroke="#1b2f5e" stroke-width="1.6" stroke-linejoin="round"/><rect x="19" y="2" width="4" height="9" fill="#1b2f5e"/></svg>
+    <span>AGENTVIZ WORKS</span>
+  </div>
+  <div id="ident" class="ident"></div>
+  <div class="controls">
+    <span id="mode" class="mode live" role="status">LIVE</span>
+    <button id="pause" type="button" aria-pressed="false">Pause</button>
+    <div class="speed" role="group" aria-label="Speed">
+      <button type="button" data-speed="0.5">0.5×</button><button type="button" data-speed="1" class="on">1×</button><button type="button" data-speed="2">2×</button><button type="button" data-speed="4">4×</button>
+    </div>
+  </div>
+</header>
+<main id="floorWrap">
+  <svg id="floor" viewBox="0 0 1200 720" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Factory floor: live view of the session"></svg>
+  <div id="frozen" class="frozen" hidden>INSPECTING A MOMENT · <span id="frozenAt"></span> · press Resume to go live</div>
+</main>
+<aside id="panel">
+  <section id="foreman" aria-label="Foreman's board"></section>
+  <nav class="tabs" role="tablist">
+    <button type="button" role="tab" data-tab="ledger" class="on">Dispatch ledger</button>
+    <button type="button" role="tab" data-tab="sheet">Inspection sheet</button>
+  </nav>
+  <div id="ledger" class="tabpane"></div>
+  <div id="sheet" class="tabpane" hidden></div>
+</aside>
+<section id="shift" aria-label="Shift log, last 30 minutes">
+  <svg id="shiftSvg" role="img" aria-label="Production per minute, errors and markers"></svg>
+</section>
+<script src="../shared/sim.js"></script>
+<script src="factory.js"></script>
+</body>
+</html>

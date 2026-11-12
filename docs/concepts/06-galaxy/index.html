@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code Galaxy</title>
+<link rel="stylesheet" href="galaxy.css">
+</head>
+<body>
+<header id="top">
+  <div id="ident" aria-live="polite"></div>
+  <div id="controls">
+    <button id="pause" class="ctl" title="Pause or resume the session (Space)">❚❚ Pause</button>
+    <div class="speeds" role="group" aria-label="Speed">
+      <button class="ctl spd" data-speed="0.5">0.5×</button>
+      <button class="ctl spd on" data-speed="1">1×</button>
+      <button class="ctl spd" data-speed="2">2×</button>
+      <button class="ctl spd" data-speed="4">4×</button>
+    </div>
+    <button id="fit" class="ctl" title="Reset zoom and pan (0)">⤢ Fit</button>
+    <button id="mode" class="ctl mode live" title="Live or inspecting a moment">● LIVE</button>
+  </div>
+</header>
+
+<main id="grid">
+  <aside id="left" class="col">
+    <section class="panel" id="p-kinds"><h2>Work phenomena <small>✕ = errors since prompt</small></h2><div id="kinds"></div></section>
+    <section class="panel" id="p-cargo"><h2>Cargo hold <small>context window</small></h2><div id="cargo"></div></section>
+    <section class="panel" id="p-nav"><h2>Navigation log <small>task list</small></h2><div id="navlog"></div></section>
+  </aside>
+
+  <section id="chartwrap" aria-label="Code galaxy star chart">
+    <canvas id="chart" tabindex="0" aria-label="Star chart. Arrow keys cycle objects, Enter opens detail, plus and minus zoom."></canvas>
+    <div id="banner" hidden></div>
+    <div id="tip" hidden></div>
+    <details id="legend" open><summary>Legend</summary><div id="legend-body"></div></details>
+  </section>
+
+  <aside id="right" class="col">
+    <div id="hud-right">
+      <section class="panel" id="p-lanes"><h2>Probe roster <small>agent lanes</small></h2><div id="lanes"></div></section>
+      <section class="panel" id="p-cat"><h2>Star catalogue <small>file footprint</small></h2><div id="catalogue"></div></section>
+      <section class="panel" id="p-recent"><h2>Recent activity <small>folded</small></h2><div id="recent"></div></section>
+    </div>
+    <div id="detail" hidden role="dialog" aria-label="Detail">
+      <div id="d-head"><button id="d-back" class="ctl" title="Back">‹ Back</button><span id="d-title"></span><button id="d-close" class="ctl" title="Close (Esc)">✕</button></div>
+      <div id="d-body"></div>
+    </div>
+  </aside>
+
+  <footer id="recorder">
+    <canvas id="timeline" tabindex="0" aria-label="Flight recorder: last 30 minutes. Drag or arrow keys to inspect a moment, End to return to live."></canvas>
+  </footer>
+</main>
+
+<script src="../shared/sim.js"></script>
+<script src="galaxy.js"></script>
+</body>
+</html>
