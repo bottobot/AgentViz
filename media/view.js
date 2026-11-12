@@ -235,6 +235,86 @@
       <div class="timeline-labels"><span>${axis ? at(axis.from) : ''}</span><span>Line = first to last record <i class="legend-end"></i> recorded end <i class="legend-open"></i> end not recorded <i class="legend-error"></i> tool error</span><span>${axis ? at(axis.to) : ''}</span></div></section>`;
   }
 
+  // Task list progress (S05). The numbers come only from a list the agent itself recorded: Claude TodoWrite or
+  // Task records, or Codex update_plan records. Tool activity never feeds them. A list belongs to the one transcript
+  // that recorded it, so the followed session and each subagent lane are shown apart and never added together.
+  // A task label is written only inside the progress area.
+  const progressSources = {
+    'claude-todos': 'Claude TodoWrite records',
+    'claude-tasks': 'Claude Task records (TaskCreate, TaskUpdate, TaskList)',
+    'codex-plan': 'Codex update_plan records'
+  };
+
+  function progressFacts(progress) {
+    const listed = Boolean(progress) && typeof progress === 'object';
+    const available = listed && Object.hasOwn(progressSources, progress.source) && Array.isArray(progress.items);
+    const items = available ? progress.items.filter(item => item && typeof item === 'object') : [];
+    const count = status => items.filter(item => item.status === status).length;
+    const whole = value => listed && Number.isInteger(value) && value > 0 ? value : 0;
+    const completed = count('completed');
+    const inProgress = count('in_progress');
+    const pending = count('pending');
+    return { available, source: available ? progressSources[progress.source] : '', items, total: items.length, completed, inProgress, pending,
+      unknown: items.length - completed - inProgress - pending, current: items.filter(item => item.status === 'in_progress'),
+      omitted: whole(progress?.omitted), unread: whole(progress?.unread), unmatched: whole(progress?.unmatched), unreadable: whole(progress?.unreadable),
+      updatedAt: listed && Number.isFinite(progress.updatedAt) ? progress.updatedAt : 0 };
+  }
+
+  const countLine = facts => `${facts.completed} of ${facts.total} listed ${facts.total === 1 ? 'item' : 'items'} completed`;
+  const taskLabel = item => `<span class="task-label">${escape(item.label)}</span> <span class="lane-id">ITEM ${escape(item.id)}</span>`;
+
+  function progressGaps(facts) {
+    const gaps = [];
+    if (facts.omitted) gaps.push(`${facts.omitted} further ${facts.omitted === 1 ? 'item' : 'items'} in the source list are not shown or counted (limit 200).`);
+    if (facts.unmatched) gaps.push(`${plural(facts.unmatched, 'update')} named a task this transcript did not create; not counted.`);
+    if (facts.unreadable) gaps.push(`${plural(facts.unreadable, 'list record')} could not be read; not counted.`);
+    if (facts.unread) gaps.push(`${plural(facts.unread, 'code call')} named the plan tool; a plan written as program text is not read.`);
+    return gaps;
+  }
+
+  // The full statement for the followed session.
+  function progressBody(facts, status) {
+    const gaps = progressGaps(facts);
+    const gapText = gaps.length ? `<p class="muted progress-gap" role="status">${gaps.map(escape).join(' ')}</p>` : '';
+    if (!facts.available) return `<p class="muted">No explicit task list is recorded in this transcript. Supported lists: Claude TodoWrite and Task records, Codex update_plan records. Tool activity is not used to estimate progress.</p>${gapText}`;
+    const source = `<p class="muted progress-source">${escape(`Source: ${facts.source} in this transcript${facts.updatedAt ? ` (last list record ${clock(facts.updatedAt)})` : ''}. This is the agent's own plan, not independently measured project completion.`)}</p>`;
+    if (!facts.total) return `<p class="progress-count">The recorded list is empty.</p>${source}${gapText}`;
+    const open = facts.total - facts.completed;
+    const parts = [`<b>${countLine(facts)}</b>`, `${facts.inProgress} in progress`, `${facts.pending} not started`];
+    if (facts.unknown) parts.push(`${facts.unknown} with a status this view does not recognise`);
+    let current = '<p class="progress-current">No item is marked in progress.</p>';
+    if (facts.current.length) current = `<p class="progress-current">Current ${facts.current.length === 1 ? 'item' : 'items'}, as marked by the agent:</p>
+      <ul class="task-list">${facts.current.slice(0, 3).map(item => `<li>${taskLabel(item)}</li>`).join('')}${facts.current.length > 3 ? `<li class="muted">and ${facts.current.length - 3} more marked in progress</li>` : ''}</ul>`;
+    else if (!open) current = '<p class="progress-current">Every listed item is marked completed.</p>';
+    const ended = open && (status === 'complete' || status === 'paused') ? `<p class="progress-ended" role="status">The last turn ${status === 'paused' ? 'was interrupted' : 'ended'} with ${open} listed ${open === 1 ? 'item' : 'items'} still open.</p>` : '';
+    return `<progress class="task-bar" max="${facts.total}" value="${facts.completed}" aria-label="${countLine(facts)}, from the agent's own task list">${countLine(facts)}</progress>
+      <p class="progress-count">${parts.join(' · ')}</p>${current}${ended}${source}${gapText}`;
+  }
+
+  // One line for a subagent lane's own list.
+  function progressLine(facts) {
+    if (!facts.available) return `No explicit task list is recorded in this transcript.${facts.unread ? ` ${escape(progressGaps(facts).join(' '))}` : ''}`;
+    if (!facts.total) return `The recorded list is empty. ${escape(facts.source)}.`;
+    const current = facts.current.length ? ` · Current: ${taskLabel(facts.current[0])}${facts.current.length > 1 ? ` and ${facts.current.length - 1} more` : ''}` : '';
+    const gaps = progressGaps(facts);
+    return `${countLine(facts)}${current} · ${escape(facts.source)}${gaps.length ? ` · ${escape(gaps.join(' '))}` : ''}`;
+  }
+
+  function progressPanel(session, lanes) {
+    const facts = progressFacts(session.progress);
+    const head = !facts.available ? 'Unavailable' : facts.total ? `${facts.completed} / ${facts.total} COMPLETED` : 'EMPTY LIST';
+    const children = lanes.slice(1).filter(lane => !lane.missing);
+    const loaded = children.filter(lane => 'progress' in lane);
+    let below = '';
+    if (loaded.length) below += `<p class="muted">Subagent lists are separate. Each is that subagent's own plan and is not added to the list above.</p>
+      <ul class="progress-lanes">${loaded.map(lane => `<li><span aria-hidden="true">↳ </span><b>${escape(laneName(lane))}</b> <span class="lane-id">${escape(String(lane.key).slice(0, 8))}</span><span class="progress-lane-facts">${progressLine(progressFacts(lane.progress))}</span></li>`).join('')}</ul>`;
+    const unloaded = children.length - loaded.length;
+    if (unloaded) below += `<p class="muted">Task lists of the ${unloaded} subagent ${unloaded === 1 ? 'lane' : 'lanes'} are not loaded in this view. The list above covers the ${lanes[0].role === 'subagent' ? 'followed subagent' : 'main session'} only.</p>`;
+    return `<div class="progress-block panel"><div class="context-title"><h2>Task list progress</h2><span>${head}</span></div>
+      <p class="muted progress-owner">${lanes[0].role === 'subagent' ? 'Followed subagent' : 'Main session'}</p>
+      ${progressBody(facts, session.status)}${below ? `<div class="progress-subagents">${below}</div>` : ''}</div><!-- /progress -->`;
+  }
+
   // Navigation (S02). These work on the catalogue the host sends; they never see paths or transcript content.
   const needle = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
   const providerName = provider => provider === 'claude' ? 'Claude' : 'Codex';
@@ -327,8 +407,9 @@
       <section class="detail-panel"><div class="metrics"><div><span>RECORDED CALLS</span><strong>${summary.total}</strong></div><div><span>TOOL ERRORS</span><strong class="${summary.errors ? 'error-number' : ''}">${summary.errors}</strong></div></div>
       <div class="context-block panel"><div class="context-title"><h2>Context window</h2><span>${context === null ? 'Unavailable' : `${session.context}%`}</span></div>
         ${context === null ? '<p class="muted">This source has not reported usage and capacity.</p>' : `<meter min="0" max="100" low="70" high="90" optimum="0" value="${context}" aria-label="Context window usage">${context}%</meter><p class="muted">Reported by the session. Amber at 70%, red at 90%.</p>`}</div>
+      ${progressPanel(session, lanes)}
       <div class="recent-panel panel"><div class="panel-heading"><h2>Recent activity</h2><span>SIMILAR EVENTS FOLDED</span></div><ol>${recent(events) || '<li class="muted">No tool activity recorded yet.</li>'}</ol></div>
-      <p class="privacy-note">Names only. Prompts, command arguments and tool output stay out of this view.</p></section></div>
+      <p class="privacy-note">Names only. Prompts, command arguments and tool output stay out of this view. Task list labels appear only under Task list progress.</p></section></div>
       ${lanesPanel(lanes, session.family)}
       <section class="timeline-panel panel"><div class="panel-heading"><h2>Activity over time</h2><span>LAST 30 MINUTES · 30s PER BAR · ${escape(scope.toUpperCase())}</span></div>${timeline(events, now)}
       <div class="timeline-labels"><span>${clock(Math.floor(now / 30000) * 30000 - 59 * 30000)}</span><span>Gaps = silence <i class="legend-error"></i> tool error <i class="legend-marker"></i> turn / compaction</span><span>Now</span></div></section>
@@ -355,7 +436,13 @@
       lane('demo-nested', 'Checker', 'demo-explore', 2, start + 6 * 60000, { state: 'failed', time: start + 7 * 60000 }, ['Running tests', 'Running tests'], 1),
       lane('demo-tests', 'Test runner', 'main', 1, start + 7 * 60000, { state: 'open', time: null }, ['Reading files', 'Running tests', 'Editing test/session.test.js', 'Running tests'])
     ];
-    return { provider: 'claude', id: 'example-session', project: 'AgentViz', parent: null, events, updatedAt: events.at(-1).time, startedAt: start, status: 'active', context: 66, invalidLines: 0, oversizedLines: 0, droppedEvents: 0,
+    // Made-up task lists: one for the main session, one for a subagent, kept apart.
+    const list = (source, updatedAt, rows) => ({ source, items: rows.map(([status, label], index) => ({ id: String(index + 1), status, label })), omitted: 0, unread: 0, unmatched: 0, unreadable: 0, updatedAt });
+    const progress = list('claude-tasks', start + 14 * 60000, [['completed', 'Read the session reader'], ['completed', 'Add the example fixture'], ['in_progress', 'Run the test suite'], ['pending', 'Update the notes'], ['pending', 'Package the extension']]);
+    lanes[1].progress = list('claude-todos', start + 8 * 60000, [['completed', 'Find the readers'], ['completed', 'Summarise the call sites']]);
+    lanes[2].progress = null;
+    lanes[3].progress = null;
+    return { provider: 'claude', id: 'example-session', project: 'AgentViz', parent: null, events, updatedAt: events.at(-1).time, startedAt: start, status: 'active', context: 66, progress, invalidLines: 0, oversizedLines: 0, droppedEvents: 0,
       family: { lanes, found: 3, limit: 24, eventLimit: 2000, notes: [] } };
   }
 
@@ -378,7 +465,7 @@
     }));
   }
 
-  const api = { summarize, activityBuckets, render, demoSession, familyLanes, familyEvents, laneCounts, laneFacts, laneAxis, demoCatalogue, demoIdentity, filterSessions, navigate, workspaceChoices, idLabels, sessionLabel };
+  const api = { summarize, activityBuckets, render, demoSession, progressFacts, familyLanes, familyEvents, laneCounts, laneFacts, laneAxis, demoCatalogue, demoIdentity, filterSessions, navigate, workspaceChoices, idLabels, sessionLabel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.AgentViz = api;
 })(typeof globalThis === 'undefined' ? this : globalThis);

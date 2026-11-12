@@ -10,7 +10,7 @@ The executable schedule is `workflows/agentviz-next.plan.json`, named **AgentViz
 | S02 navigation filters | Implemented, awaiting board review | 153bc7 (plan card a40b39) | `14273a5` | `npm test` 50/50, `npm run check` exit 0, headless Edge 17/17; see S02 below |
 | S03 complete catalogue lookup | Implemented, awaiting board review | 6e5778 (plan card a40b39) | `6977d3e` | `npm test` 63/63, `npm run check` exit 0; see S03 below |
 | S04 agent lanes | Implemented, awaiting board review | c15df0 (plan card a40b39) | See `git log` on `task/c15df0` (commit titled "feat: show main and subagent lanes (S04)") | `npm test` 71/71, `npm run check` exit 0, local sample 24 families; see S04 below |
-| S05 explicit task progress | Pending | Not allocated | None | Not run |
+| S05 explicit task progress | Implemented, awaiting board review | d5e522 (plan card a40b39) | See `git log` on `task/d5e522` (commit titled "feat: show progress from explicit agent task lists (S05)") | `npm test` 83/83, `npm run check` exit 0; no local list records exist, see S05 below |
 | S06 file footprint | Pending | Not allocated | None | Not run |
 | S07 AgentBoard entry command | Pending | Not allocated | None | Not run |
 | S08 reliability and cost | Pending | Not allocated | None | Not run |
@@ -304,4 +304,96 @@ One Claude family exceeded the lane limit and one had parent-recorded children w
 - The status pill still describes the followed session's own turn; "Quiet" now uses the latest record of any lane.
 - Contrast and screen reader output were not measured. Linux and VSCodium were not run.
 
-Next action: board review of `task/c15df0`, then S05.
+Next action at the end of S04: board review of `task/c15df0`, then S05 (now done, below).
+
+## S05: Show progress from explicit agent task lists
+
+Owner: card `d5e522`, branch `task/d5e522`, AgentBoard worktree. Dependency commit: `b233c9e` (S04 integrated). Code commit: the commit on this branch titled "feat: show progress from explicit agent task lists (S05)". Review and integration: pending, done by the board.
+
+### Headline: no supported list record exists in the local transcripts
+
+The local sources hold **no** structured task list record of either provider. The parsers below are therefore built from the providers' published tool definitions and tested on synthetic records only. They have not been run against a real list record.
+
+### What the local sources hold (2026-11-12, native Windows, names and counts only)
+
+No label, path, prompt or payload value was printed or saved. The probe scripts were temporary and are not committed.
+
+| Provider | Looked for | Scanned | Found |
+| --- | --- | --- | --- |
+| Claude | `TodoWrite`, `TaskCreate`, `TaskUpdate` tool calls | 2,407 of 2,416 transcripts in the default folder (6.2 GB, September to November 2026; 9 over 80 MB skipped) | 0 |
+| Claude | the same, in the other local account folders | 1,190 of 1,192 transcripts | 0 |
+| Claude | any `"todos":[` key | the same 2,407 | 0 |
+| Codex | `update_plan` as a structured `function_call` or `custom_tool_call` | 1,191 of 1,209 rollouts (6.0 GB; 18 over 80 MB skipped) | 0 |
+| Codex | `plan_update` event, `todo_list` item | the same 1,191 | 0 |
+| Codex | the text `tools.update_plan(` inside an `exec` call's program text | the same 1,191 | 3 calls, all in main rollouts |
+
+The probe did run: the same call pattern found `TaskStop` calls in 73 Claude transcripts and `followup_task` calls in 94 Codex rollouts, and 1,052 of the 1,190 account transcripts held some tool call.
+
+Why Claude has none: the published page says the task tools are on by default only for Claude Opus 4.7, Sonnet 4.6, Haiku 4.5 and earlier models; newer models need an opt-in. The local sessions use newer models.
+
+The three Codex calls: the argument is a JavaScript object literal (not strict JSON) in a program that also calls other tools. Their output is a list of text parts that does not say which nested call was accepted. No separate plan record follows. Program text is not a record of an accepted plan, so it is **counted and not read**.
+
+### Schemas used (provider definitions, read 2026-11-12)
+
+| Form | Source of the definition | Fields read | Fields never read |
+| --- | --- | --- | --- |
+| Claude `TodoWrite` | `code.claude.com/docs/en/agent-sdk/typescript` (`TodoWriteInput`) | `todos[].content`, `todos[].status` (`pending`, `in_progress`, `completed`). Whole list on every call. No IDs, so the ID is the position | `activeForm` |
+| Claude `TaskCreate` | same page (`TaskCreateInput`, `TaskCreateOutput`) and `.../agent-sdk/todo-tracking` | input `subject`; result `task.id` | `description`, `activeForm`, `metadata` |
+| Claude `TaskUpdate` | same (`TaskUpdateInput`, `TaskUpdateOutput`) | input `taskId` (also `id`, `task_id`, the documented near misses), `status` (adds `deleted`), `subject`; result `success` | `description`, `owner`, `metadata`, `addBlocks`, `addBlockedBy`, `error` |
+| Claude `TaskList` | same (`TaskListOutput`) | result `tasks[].id`, `subject`, `status`. Whole list | `owner`, `blockedBy` |
+| Codex `update_plan` | `openai/codex`, `codex-rs/protocol/src/plan_tool.rs` (`UpdatePlanArgs`) | `plan[].step`, `plan[].status` (`pending`, `in_progress`, `completed`). Whole list, position as ID | `explanation` |
+
+The envelopes around them are the ones verified on local data in S01 to S04 for other tools: a `tool_use` part in an assistant record, `toolUseResult` on the answering user record, a Codex `function_call` with JSON `arguments` and its `function_call_output`.
+
+### What changed
+
+- `src/transcript.js`: each transcript state has `progress` (null until a list record is accepted): `{ source, items: [{ id, status, label }], omitted, unread, unmatched, unreadable, updatedAt }`. `source` is `claude-todos`, `claude-tasks`, `codex-plan`, or empty when only unread code calls were seen. Host-only bookkeeping (`tasks`) is not serialised.
+- `media/view.js`: `progressFacts` and a "Task list progress" panel under the context window. The example session has synthetic lists.
+- `media/style.css`: the panel, bar, current item and subagent rows. No inline styles; the CSP is unchanged.
+- `test/progress.test.js`: new.
+- Not touched: `src/sessions.js`, `src/extension.js`, `media/app.js`, `src/webview.js`. The followed session's `progress` reaches the view through the existing snapshot spread.
+
+### Behaviour
+
+- **Only accepted records count.** A list call is held until its result record arrives. An error result, `success: false` or a missing result changes nothing. A Codex call counts only after its output record, and not if that output reports a failure.
+- **Replacement lists** (`TodoWrite`, `update_plan`, `TaskList`) replace the whole list. **Task records** build one list by task ID: create adds `pending`; update changes status or label; `deleted` removes.
+- **Duplicates.** A call ID is applied once. A repeated older record cannot bring back an older list.
+- **Compaction and turn end** do not change the list. An ended or interrupted turn with open items reads "The last turn ended with N listed items still open."
+- **Absent list.** "Unavailable", with the supported forms named and "Tool activity is not used to estimate progress." An explicit empty list reads "The recorded list is empty", not unavailable.
+- **Rendered:** completed/total as text and a bar, counts in progress and not started, up to three current items with their IDs, the source form and last list record time, and "This is the agent's own plan, not independently measured project completion."
+- **Labels.** One line, 80 characters, control and direction-override characters removed (`sessionTitle`), escaped at the display boundary. They appear only inside the progress area; a test removes that area and checks no label is left.
+- **Statuses** outside the three known words are shown as "a status this view does not recognise" and never counted as completed.
+- **Main and subagent lists are separate.** No merged total exists. The panel lists each subagent lane's own list under its lane name when the lane carries one. No source field marking a shared list was found, so none is treated as shared.
+- **Disclosed counts:** items past 200 per list ("not shown or counted"); updates naming a task this transcript did not create; list records that could not be read; Codex code calls that named the plan tool.
+
+### Checks (worktree, PowerShell 7, Node v26.7.0)
+
+| Command | Result |
+| --- | --- |
+| `node --test test/progress.test.js` with the first 11 new tests on the previous sources (`b233c9e`, extracted with `git archive`) | exit 1: 11 tests, 0 pass, 11 fail |
+| `npm test` on this branch | exit 0: 83 tests, 83 pass, 0 fail |
+| `npm run check` on this branch | exit 0 |
+
+Regressions added (12, all in `test/progress.test.js`): no list means no progress whatever the tool activity; `TodoWrite` replacement, refused and unanswered calls, empty list; Task create, update, rename, delete, near-miss keys, unsuccessful updates, unknown task, missing ID and `TaskList`; Codex `update_plan` replacement, call without output, failed call, bad arguments and the code-call count; duplicates for all three forms; compaction and an ended turn with open items; hostile and oversized labels, unknown statuses, unsafe IDs and the 200 item cut; the progress area (completed/total, current item, source, disclaimer, labels nowhere else); the unavailable state for both providers; separate main and subagent lists; the real host reader forwarding a list from a file across an appended result; the example list and stylesheet rules. The twelfth (host reader) was added after the baseline run; it needs `progress` and fails without it for the same reason.
+
+### Evidence
+
+`artifacts/s05/` in this worktree (git-ignored, local only, synthetic data): `progress-synthetic.html` and `progress-synthetic-desktop.png` (example session, real view and stylesheet, headless Edge, 1280 px), `progress-unavailable.html` and `progress-unavailable-desktop.png`, `progress-ended-turn.html`, and `progress-synthetic.txt` (the panel text for four states).
+
+### Provider coverage gaps
+
+- **Claude:** supported forms are implemented from the published definitions; **zero local records**, so real-record compatibility is unverified. With the local models the panel reads "Unavailable" for every real Claude session.
+- **Codex:** the structured `update_plan` call is implemented from the published definition; **zero local records**. The only local form (3 calls) is program text inside `exec`, which is not read. Every real local Codex session reads "Unavailable", three of them with the code-call note.
+- No local compatibility sample was possible for this step. That differs from S01 to S04.
+
+### Other gaps and limits
+
+- **Subagent lists do not reach the view in the host.** The parser builds `progress` for every transcript, and the view draws `lane.progress`, but lane objects are built in `src/sessions.js`, which this step does not own. Until a later step adds `progress` to the lane there, the panel says "Task lists of the N subagent lanes are not loaded in this view." The separate-lists test uses synthetic lanes.
+- When one user record answers several calls, `toolUseResult` is not attributed (as in S04). A `TaskCreate` answered that way is counted as unreadable.
+- A `TaskUpdate` whose result has no `success` field is applied if the result is not an error.
+- Task records written to a task list by another session are unknown here until a `TaskList` result is recorded; updates to them are counted as unmatched.
+- Whether a Claude list survives compaction in the product was not observed; the transcript is append-only and the list is kept.
+- Not run in a VS Code host. The narrow layout was not verified: headless Edge would not render below about 500 px, so that screenshot was discarded. S09 owns host acceptance.
+- Contrast and screen reader output were not measured. Linux and VSCodium were not run.
+
+Next action: board review of `task/d5e522`, then S06.

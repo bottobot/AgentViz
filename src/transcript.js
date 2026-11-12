@@ -66,8 +66,11 @@ function describeTool(name, input) {
 }
 
 function createSession(provider, id) {
-  const state = { provider, id, project: '', parent: null, events: [], status: 'unknown', context: null, updatedAt: 0, startedAt: 0, invalidLines: 0, oversizedLines: 0, droppedEvents: 0 };
+  // progress stays null until this transcript records an explicit task list (S05). It is never derived from events.
+  const state = { provider, id, project: '', parent: null, events: [], status: 'unknown', context: null, progress: null, updatedAt: 0, startedAt: 0, invalidLines: 0, oversizedLines: 0, droppedEvents: 0 };
   Object.defineProperties(state, {
+    // Host only (S05): calls waiting for their result, calls already applied, and the list being built.
+    tasks: { value: { pending: new Map(), done: new Map(), items: new Map(), source: '', omitted: 0, unread: 0, unmatched: 0, unreadable: 0, updatedAt: 0 } },
     calls: { value: new Map() },
     markers: { value: new Set() },
     turn: { value: null, writable: true },
@@ -115,6 +118,113 @@ function spawnResult(state, time, part, result) {
   const entry = { launched: call ? call.time : time, reported: time, ended: failed || result?.status === 'completed', failed };
   if (typeof part.tool_use_id === 'string') remember(state.lifecycle.spawns, part.tool_use_id, entry);
   if (agent) remember(state.lifecycle.agents, agent, entry);
+}
+
+// Explicit task lists (S05). Record forms follow the providers' published tool definitions, checked 2026-11-12:
+//   Claude TodoWrite  input { todos: [{ content, status, activeForm }] }: the whole list on every call, no IDs.
+//   Claude TaskCreate input { subject, description, activeForm?, metadata? }; the ID is only in the result,
+//                     toolUseResult { task: { id, subject } }.
+//   Claude TaskUpdate input { taskId, status?: pending | in_progress | completed | deleted, subject?, ... };
+//                     toolUseResult { success, taskId, updatedFields, error?, statusChange? }. The stored input is
+//                     what the model wrote, so the documented near misses id and task_id are accepted for taskId.
+//   Claude TaskList   toolUseResult { tasks: [{ id, subject, status, owner?, blockedBy }] }: the whole list.
+//   Codex update_plan function_call arguments { explanation?, plan: [{ step, status }] }: the whole list, no IDs.
+// The envelopes (tool_use part, toolUseResult on the answering record, function_call with JSON arguments and its
+// output) are the ones verified on local data for other tools. No local transcript held one of these list
+// records, so the list schemas themselves rest on the published definitions.
+// Kept per item: an ID (the source's, or the position where the source has none), a status word and one short
+// cleaned label. Descriptions, explanations, active forms, owners and metadata are never read out.
+// A list changes only when the source recorded that the call was accepted. Nothing here looks at tool counts.
+// WARNING: bounded list; items past this many are not kept or counted, and the view says how many.
+const PROGRESS_ITEMS = 200;
+const PENDING_LIMIT = 200;
+const STATUSES = new Set(['pending', 'in_progress', 'completed']);
+const taskId = value => {
+  const text = typeof value === 'number' && Number.isSafeInteger(value) ? String(value) : value;
+  return typeof text === 'string' && /^[\w.:-]{1,40}$/.test(text) ? text : '';
+};
+const taskStatus = value => STATUSES.has(value) ? value : 'unknown';
+const taskLabel = value => sessionTitle(value) || 'Unlabelled item';
+
+function explicitList(entries, labelKey, withIds) {
+  if (!Array.isArray(entries)) return null;
+  const items = new Map();
+  let skipped = 0;
+  for (const [index, entry] of entries.entries()) {
+    if (items.size >= PROGRESS_ITEMS) break;
+    const id = withIds ? taskId(entry?.id) : String(index + 1);
+    if (!id || items.has(id)) { skipped++; continue; }
+    items.set(id, { id, status: taskStatus(entry?.status), label: taskLabel(entry?.[labelKey]) });
+  }
+  return { items, omitted: entries.length - items.size - skipped, skipped };
+}
+
+function publishProgress(state, time) {
+  const tasks = state.tasks;
+  tasks.updatedAt = Math.max(tasks.updatedAt, time);
+  state.progress = { source: tasks.source, items: [...tasks.items.values()].map(item => ({ id: item.id, status: item.status, label: item.label })),
+    omitted: tasks.omitted, unread: tasks.unread, unmatched: tasks.unmatched, unreadable: tasks.unreadable, updatedAt: tasks.updatedAt };
+}
+
+// A list call is only remembered here. It takes effect in taskResult, when the source records its outcome.
+function taskCall(state, id, name, input) {
+  const tasks = state.tasks;
+  if (typeof id !== 'string' || !id || typeof name !== 'string' || tasks.pending.has(id) || tasks.done.has(id)) return;
+  const args = input && typeof input === 'object' ? input : {};
+  let call = null;
+  if (state.provider === 'claude') {
+    if (name === 'TodoWrite') call = { form: 'claude-todos', list: explicitList(args.todos, 'content', false) };
+    else if (name === 'TaskCreate') call = { form: 'claude-tasks', create: taskLabel(args.subject) };
+    else if (name === 'TaskUpdate') call = { form: 'claude-tasks', update: { id: taskId(args.taskId ?? args.id ?? args.task_id), status: args.status, label: sessionTitle(args.subject) } };
+    else if (name === 'TaskList') call = { form: 'claude-tasks', read: true };
+  } else if (name === 'update_plan') call = { form: 'codex-plan', list: explicitList(args.plan, 'step', false) };
+  if (!call) return;
+  tasks.pending.set(id, call);
+  if (tasks.pending.size > PENDING_LIMIT) tasks.pending.delete(tasks.pending.keys().next().value);
+}
+
+function taskResult(state, time, id, failed, result) {
+  const tasks = state.tasks;
+  const call = tasks.pending.get(id);
+  if (!call) return;
+  tasks.pending.delete(id);
+  remember(tasks.done, id, true);
+  const output = result && typeof result === 'object' ? result : {};
+  // A refused or unsuccessful call changed nothing in the source, so it changes nothing here.
+  if (failed || output.success === false) return;
+  // Another list form in the same transcript starts a new list; the forms are never merged.
+  const start = () => { if (tasks.source !== call.form) { tasks.source = call.form; tasks.items = new Map(); tasks.omitted = 0; } };
+  if ('list' in call) {
+    if (!call.list) tasks.unreadable++;
+    else { start(); tasks.items = call.list.items; tasks.omitted = call.list.omitted; tasks.unreadable += call.list.skipped; }
+  } else if ('create' in call) {
+    const created = taskId(output.task?.id);
+    if (!created) tasks.unreadable++;
+    else {
+      start();
+      if (!tasks.items.has(created)) {
+        if (tasks.items.size >= PROGRESS_ITEMS) tasks.omitted++;
+        else tasks.items.set(created, { id: created, status: 'pending', label: call.create });
+      }
+    }
+  } else if (call.update) {
+    const item = tasks.source === call.form ? tasks.items.get(call.update.id) : null;
+    if (!call.update.id) tasks.unreadable++;
+    else if (!item) { if (call.update.status !== 'deleted') tasks.unmatched++; }
+    else if (call.update.status === 'deleted') tasks.items.delete(item.id);
+    else {
+      if (call.update.status !== undefined) item.status = taskStatus(call.update.status);
+      if (call.update.label) item.label = call.update.label;
+    }
+  } else {
+    const list = explicitList(output.tasks, 'subject', true);
+    if (!list) return;
+    start();
+    tasks.items = list.items;
+    tasks.omitted = list.omitted;
+    tasks.unreadable += list.skipped;
+  }
+  publishProgress(state, time);
 }
 
 function push(state, event) {
@@ -172,7 +282,7 @@ function applyRecord(state, record) {
     if (record.type === 'attachment') { if (record.attachment?.type === 'queued_command') taskNotice(state, time, record.attachment.prompt); return; }
     const content = Array.isArray(record.message?.content) ? record.message.content : [];
     if (record.type === 'assistant') {
-      for (const part of content) if (part?.type === 'tool_use') startTool(state, time, part.id, part.name, part.input);
+      for (const part of content) if (part?.type === 'tool_use') { taskCall(state, part.id, part.name, part.input); startTool(state, time, part.id, part.name, part.input); }
       if (record.message?.stop_reason === 'end_turn') {
         state.status = 'complete';
         marker(state, time, 'complete', record.uuid, 'Turn complete');
@@ -182,6 +292,7 @@ function applyRecord(state, record) {
       for (const part of results) {
         finishTool(state, part.tool_use_id, part.is_error === true);
         spawnResult(state, time, part, results.length === 1 ? record.toolUseResult : null);
+        taskResult(state, time, part.tool_use_id, part.is_error === true, results.length === 1 ? record.toolUseResult : null);
       }
       const text = typeof record.message?.content === 'string' ? record.message.content : content.find(part => part?.type === 'text')?.text;
       // An end report delivered as a user record is a lifecycle event, not something the user typed.
@@ -219,8 +330,21 @@ function applyRecord(state, record) {
       if (typeof payload.arguments === 'string') {
         try { input = JSON.parse(payload.arguments); } catch { input = {}; }
       }
+      taskCall(state, payload.call_id, payload.name, input);
+      // Verified local shape (2026-11-12, 3 calls in 1,191 rollouts): in code mode the plan tool is called from
+      // program text inside an exec call, as a JavaScript object literal. That text is a program, not a record of
+      // an accepted plan, so it is counted as not read and never parsed.
+      const tasks = state.tasks;
+      if (payload.name === 'exec' && typeof payload.input === 'string' && typeof payload.call_id === 'string' && !tasks.done.has(payload.call_id) && /\btools\.update_plan\s*\(/.test(payload.input)) {
+        remember(tasks.done, payload.call_id, true);
+        tasks.unread++;
+        publishProgress(state, time);
+      }
       startTool(state, time, payload.call_id, payload.name, input);
-    } else if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output') finishTool(state, payload.call_id, failedOutput(payload.output));
+    } else if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output') {
+      finishTool(state, payload.call_id, failedOutput(payload.output));
+      taskResult(state, time, payload.call_id, failedOutput(payload.output), null);
+    }
     return;
   }
   if (record.type !== 'event_msg') return;
@@ -244,4 +368,4 @@ function applyRecord(state, record) {
   }
 }
 
-module.exports = { createSession, applyRecord, describeTool, projectName, sessionTitle, workspaceIdentity, MAX_EVENTS, LIFECYCLE_LIMIT, UNNAMED_SESSION };
+module.exports = { createSession, applyRecord, describeTool, projectName, sessionTitle, workspaceIdentity, MAX_EVENTS, LIFECYCLE_LIMIT, PROGRESS_ITEMS, UNNAMED_SESSION };
