@@ -1,0 +1,358 @@
+{
+  "v": 1,
+  "name": "AgentViz: parallel find and follow sessions",
+  "about": "Parallel metadata, filter UI and Windows harness preparation; joined navigation, feature work and command integration, then reviewed Windows acceptance and packaging.",
+  "review": "model",
+  "steps": [
+    {
+      "id": "metadata",
+      "title": "S01: Identify workspaces and saved session names",
+      "source": "ORCHESTRATION.md",
+      "goal": "Implement S01: Identify workspaces and saved session names.\n\nRead the Product contract and Boundaries in ORCHESTRATION.md, then implement only the named outcome. This is a Run a Plan worker: AgentBoard schedules, reviews and integrates the listed steps. Do not open extra cards, request another plan approval, or call finish self. Check git status/log first and preserve completed work. Use native Windows, synthetic fixtures and zero runtime dependencies. Keep prompts, raw payloads and secrets out of the view and evidence. Write only your own receipt at docs/development/agentviz-next/metadata.md with actual checks, evidence and gaps. Do not edit the shared run ledger; the final handoff consolidates receipts. Add a regression that fails before each nontrivial change.\n\n- Inspect only local schema keys needed to establish title and working directory sources. Record the observed formats without saving real titles or payloads. Retain the current `project` field until all existing callers are accounted for; add catalogue fields `workspaceKey`, `workspaceLabel`, `name`, `nameSource` and keep `sessionId` complete.\n- Write failing tests for Claude custom/generated precedence, late rename, verified Codex title lookup, missing and corrupt metadata, duplicate basenames and stable identity. Windows path comparisons may ignore case; a Linux path stored in a transcript must retain its case semantics without launching Linux.\n- Extend discovery and the host message whitelist. Keep title text short, strip controls and escape it at the display boundary. Return `Unnamed session` on a missing title. Metadata lookup must not change CLI state or credentials.\n- Accept when both providers carry tested workspace/name/ID metadata to the webview, private payload sentinels stay absent, and `unit` and `syntax` pass. Return source shape notes, changed files, commit and check results.\n\nImplement the frozen catalogue fields in the Parallel interface contract exactly; the concurrent UI must not need a guessed schema. Do not modify media/, src/webview.js or host harness files.",
+      "files": [
+        "src/sessions.js",
+        "src/transcript.js",
+        "src/extension.js",
+        "test/sessions.test.js",
+        "test/transcript.test.js",
+        "test/extension.test.js",
+        "test/metadata.test.js",
+        "docs/development/agentviz-next/metadata.md"
+      ],
+      "avoid": [
+        "ORCHESTRATION.md",
+        "docs/development/2026-11-11-orchestration-format-audit.md",
+        ".agentboard/",
+        "workflows/agentviz-next.plan.json",
+        "workflows/agentviz-next.parallel.plan.json",
+        "docs/development/agentviz-next-run.md",
+        "docs/development/agentviz-next-parallel-run.md"
+      ],
+      "checks": [
+        "unit",
+        "syntax"
+      ],
+      "reply": "The commit id, changes made, regressions added, exact check commands and results, evidence locations, and anything blocked or unverified."
+    },
+    {
+      "id": "filters",
+      "title": "S02: Add workspace, name and ID filtering",
+      "source": "ORCHESTRATION.md",
+      "goal": "Implement S02: Add workspace, name and ID filtering.\n\nRead the Product contract and Boundaries in ORCHESTRATION.md, then implement only the named outcome. This is a Run a Plan worker: AgentBoard schedules, reviews and integrates the listed steps. Do not open extra cards, request another plan approval, or call finish self. Check git status/log first and preserve completed work. Use native Windows, synthetic fixtures and zero runtime dependencies. Keep prompts, raw payloads and secrets out of the view and evidence. Write only your own receipt at docs/development/agentviz-next/filters.md with actual checks, evidence and gaps. Do not edit the shared run ledger; the final handoff consolidates receipts. Add a regression that fails before each nontrivial change.\n\n- Implement against the frozen Parallel interface contract in ORCHESTRATION.md using synthetic snapshots; S01 is a concurrent task, not a prerequisite. Add labelled project/workspace selection, name search and optional ID search. Match names and IDs case insensitively; trim surrounding whitespace. Display workspace first, then name, then ID, with provider as supporting detail. Include a usable full ID copy action.\n- Test intersection of filters, duplicate names, exact and partial IDs beyond the first eight characters, no matches, clearing filters, malicious title text, example mode, keyboard operation and a narrow viewport. Use the current catalogue as the first navigation test boundary; S03 supplies complete host lookup coverage before this milestone is considered delivered.\n- Clear or explicitly preserve selection when filters exclude it; never display another session under the selected label. Preserve input focus and typed text during background refreshes. Persist only nonsecret UI preferences through the existing webview state mechanism.\n- Accept when the requested navigation order works on synthetic provider data and `unit` and `syntax` pass. Return screenshots or DOM evidence, commit and exact behavior on an excluded selection.\n\nOwn the frontend only. Send the frozen query message and preserve legacy snapshots while backend support is pending. Do not modify src/sessions.js, src/transcript.js or src/extension.js. The discovery step joins the accepted backend and frontend and verifies complete navigation.",
+      "files": [
+        "media/app.js",
+        "media/view.js",
+        "media/style.css",
+        "src/webview.js",
+        "test/view.test.js",
+        "test/app.test.js",
+        "docs/development/agentviz-next/filters.md"
+      ],
+      "avoid": [
+        "ORCHESTRATION.md",
+        "docs/development/2026-11-11-orchestration-format-audit.md",
+        ".agentboard/",
+        "workflows/agentviz-next.plan.json",
+        "workflows/agentviz-next.parallel.plan.json",
+        "docs/development/agentviz-next-run.md",
+        "docs/development/agentviz-next-parallel-run.md"
+      ],
+      "checks": [
+        "unit",
+        "syntax"
+      ],
+      "reply": "The commit id, changes made, regressions added, exact check commands and results, evidence locations, and anything blocked or unverified."
+    },
+    {
+      "id": "host-harness",
+      "title": "P01: Prepare an isolated Windows host harness",
+      "source": "ORCHESTRATION.md",
+      "goal": "Implement P01 from ORCHESTRATION.md. This task is independent of metadata and filter UI work. Prepare test/run-extension-host.cjs to locate and verify the Windows VS Code executable, create an isolated user profile and synthetic source folders, invoke the existing test/extension-host.js suite, wait for its explicit result, and fail if the result is missing, stale or failed. Keep .cjs logic platform guarded and do not change the normal editor profile. Add test/run-extension-host.test.js for executable selection, missing/failed results and cleanup boundaries using synthetic process/filesystem fixtures. Run one real baseline host calibration and record its source commit and scope. Change only the runner, its dedicated test and docs/development/agentviz-next/host-harness.md. Do not change production files, package.json, workflows/checks.json or the shared run ledger. The final windows-acceptance task later reuses the runner against integrated features; calibration does not prove future feature acceptance. Run unit and syntax checks and commit the bounded change. Do not create extra board cards, request a second plan approval or call finish self.",
+      "files": [
+        "test/run-extension-host.cjs",
+        "test/run-extension-host.test.js",
+        "docs/development/agentviz-next/host-harness.md"
+      ],
+      "avoid": [
+        "src/",
+        "media/",
+        "package.json",
+        "workflows/",
+        "ORCHESTRATION.md",
+        "test/extension-host.js",
+        ".agentboard/",
+        "workflows/agentviz-next.plan.json",
+        "workflows/agentviz-next.parallel.plan.json",
+        "docs/development/agentviz-next-run.md",
+        "docs/development/agentviz-next-parallel-run.md"
+      ],
+      "checks": [
+        "unit",
+        "syntax"
+      ],
+      "reply": "The commit id, dedicated regressions, runner command, baseline host result and source revision, receipt path, and any missing environment or unverified behavior."
+    },
+    {
+      "id": "discovery",
+      "title": "S03: Make discovery and selection cover the requested project",
+      "source": "ORCHESTRATION.md",
+      "goal": "Implement S03: Make discovery and selection cover the requested project.\n\nRead the Product contract and Boundaries in ORCHESTRATION.md, then implement only the named outcome. This is a Run a Plan worker: AgentBoard schedules, reviews and integrates the listed steps. Do not open extra cards, request another plan approval, or call finish self. Check git status/log first and preserve completed work. Use native Windows, synthetic fixtures and zero runtime dependencies. Keep prompts, raw payloads and secrets out of the view and evidence. Write only your own receipt at docs/development/agentviz-next/discovery.md with actual checks, evidence and gaps. Do not edit the shared run ledger; the final handoff consolidates receipts. Add a regression that fails before each nontrivial change.\n\n- Complete the host query contract used by the filters. Return project groups independently of the recent session response cap; filter project/name/ID before limiting matches. Cache metadata only where measurements show repeated unnecessary reads. Do not reread every full transcript once per second.\n- Test a selected project older than 80 newer sessions, a matching full ID outside the recent list, duplicate workspace labels, a rename, deletion, no matches and stale query/configuration responses arriving out of order. Validate IDs against the current source generation and keep the selected source stable during ordinary refreshes.\n- Preserve malformed record counts, sampled rewrite recovery, partial UTF8 and pending JSON behavior. Show a visible lookup/loading/limit state instead of silently returning an incomplete global list.\n- Accept when S01 through S03 meet the whole product navigation contract, the discovery tests prove filtering precedes truncation, and `unit` and `syntax` pass. This is the first releaseable checkpoint.\n\nBoth metadata and filters must be accepted first. Implement the frozen query request/response contract and perform the first combined navigation acceptance check on the integrated branch.",
+      "files": [
+        "src/sessions.js",
+        "src/extension.js",
+        "media/app.js",
+        "test/sessions.test.js",
+        "test/extension.test.js",
+        "test/discovery.test.js",
+        "test/app.test.js",
+        "docs/development/agentviz-next/discovery.md"
+      ],
+      "avoid": [
+        "ORCHESTRATION.md",
+        "docs/development/2026-11-11-orchestration-format-audit.md",
+        ".agentboard/",
+        "workflows/agentviz-next.plan.json",
+        "workflows/agentviz-next.parallel.plan.json",
+        "docs/development/agentviz-next-run.md",
+        "docs/development/agentviz-next-parallel-run.md"
+      ],
+      "checks": [
+        "unit",
+        "syntax"
+      ],
+      "reply": "The commit id, changes made, regressions added, exact check commands and results, evidence locations, and anything blocked or unverified.",
+      "after": [
+        "metadata",
+        "filters"
+      ]
+    },
+    {
+      "id": "lanes",
+      "title": "S04: Show main and subagent lanes",
+      "source": "ORCHESTRATION.md",
+      "goal": "Implement S04: Show main and subagent lanes.\n\nRead the Product contract and Boundaries in ORCHESTRATION.md, then implement only the named outcome. This is a Run a Plan worker: AgentBoard schedules, reviews and integrates the listed steps. Do not open extra cards, request another plan approval, or call finish self. Check git status/log first and preserve completed work. Use native Windows, synthetic fixtures and zero runtime dependencies. Keep prompts, raw payloads and secrets out of the view and evidence. Write only your own receipt at docs/development/agentviz-next/lanes.md with actual checks, evidence and gaps. Do not edit the shared run ledger; the final handoff consolidates receipts. Add a regression that fails before each nontrivial change.\n\n- Derive parent/child relationships only from verified metadata and provider lifecycle events. Use one shared time axis with main first and children indented. Label unavailable lifecycle boundaries honestly; do not manufacture exact durations from gaps.\n- Follow child transcripts only for the selected session family. Deduplicate repeated metadata/calls, protect against cycles and missing parents, and disclose any child history or discovery limits. A parent recording a spawn must not be counted as the child's own tool work.\n- Test nested and overlapping children, missing child files, repeated parent metadata, child failure/completion, selection changes and cleanup. Define whether station totals include the family and apply the same definition to lanes and the strip.\n- Accept when lanes show a synthetic family and a sanitized local compatibility sample with consistent attribution and `unit` and `syntax` pass. Return the observed source mapping and evidence limits.",
+      "files": [
+        "src/sessions.js",
+        "src/transcript.js",
+        "src/extension.js",
+        "media/view.js",
+        "media/style.css",
+        "test/lanes.test.js",
+        "docs/development/agentviz-next/lanes.md"
+      ],
+      "avoid": [
+        "ORCHESTRATION.md",
+        "docs/development/2026-11-11-orchestration-format-audit.md",
+        ".agentboard/",
+        "workflows/agentviz-next.plan.json",
+        "workflows/agentviz-next.parallel.plan.json",
+        "docs/development/agentviz-next-run.md",
+        "docs/development/agentviz-next-parallel-run.md"
+      ],
+      "checks": [
+        "unit",
+        "syntax"
+      ],
+      "reply": "The commit id, changes made, regressions added, exact check commands and results, evidence locations, and anything blocked or unverified.",
+      "after": [
+        "discovery"
+      ]
+    },
+    {
+      "id": "progress",
+      "title": "S05: Show progress from explicit agent task lists",
+      "source": "ORCHESTRATION.md",
+      "goal": "Implement S05: Show progress from explicit agent task lists.\n\nRead the Product contract and Boundaries in ORCHESTRATION.md, then implement only the named outcome. This is a Run a Plan worker: AgentBoard schedules, reviews and integrates the listed steps. Do not open extra cards, request another plan approval, or call finish self. Check git status/log first and preserve completed work. Use native Windows, synthetic fixtures and zero runtime dependencies. Keep prompts, raw payloads and secrets out of the view and evidence. Write only your own receipt at docs/development/agentviz-next/progress.md with actual checks, evidence and gaps. Do not edit the shared run ledger; the final handoff consolidates receipts. Add a regression that fails before each nontrivial change.\n\n- Read verified Claude todo/task records and Codex plan update records already present in transcripts. Keep task ID, status, a bounded display label and source attribution; never infer completion from activity volume. If a provider has no supported list, show progress unavailable.\n- Render completed/total plus current explicit item. Test replacement lists, updates, duplicate records, compaction, an ended turn with open tasks, absent lists and hostile label text. A task label is allowed only in the progress area and must not bring along tool payloads or prompts.\n- Keep main and child progress distinct unless the source explicitly provides a shared list. Say that task list progress is the agent's own plan, not independently measured project completion.\n- Accept when tests cover both supported provider forms or explicitly prove and document a provider's unavailable state, and `unit` and `syntax` pass. Return the verified schemas and any provider coverage gap without inventing support.\n\nA command worker may run concurrently. Keep edits inside your declared parser, renderer, stylesheet, dedicated tests and receipt. Do not modify src/extension.js, package.json or README.md.",
+      "files": [
+        "src/transcript.js",
+        "media/view.js",
+        "media/style.css",
+        "test/progress.test.js",
+        "docs/development/agentviz-next/progress.md"
+      ],
+      "avoid": [
+        "ORCHESTRATION.md",
+        "docs/development/2026-11-11-orchestration-format-audit.md",
+        ".agentboard/",
+        "workflows/agentviz-next.plan.json",
+        "workflows/agentviz-next.parallel.plan.json",
+        "docs/development/agentviz-next-run.md",
+        "docs/development/agentviz-next-parallel-run.md"
+      ],
+      "checks": [
+        "unit",
+        "syntax"
+      ],
+      "reply": "The commit id, changes made, regressions added, exact check commands and results, evidence locations, and anything blocked or unverified.",
+      "after": [
+        "lanes"
+      ]
+    },
+    {
+      "id": "agentboard-entry",
+      "title": "S07: Provide a narrow AgentBoard entry point",
+      "source": "ORCHESTRATION.md",
+      "goal": "Implement S07: Provide a narrow AgentBoard entry point.\n\nRead the Product contract and Boundaries in ORCHESTRATION.md, then implement only the named outcome. This is a Run a Plan worker: AgentBoard schedules, reviews and integrates the listed steps. Do not open extra cards, request another plan approval, or call finish self. Check git status/log first and preserve completed work. Use native Windows, synthetic fixtures and zero runtime dependencies. Keep prompts, raw payloads and secrets out of the view and evidence. Write only your own receipt at docs/development/agentviz-next/agentboard-entry.md with actual checks, evidence and gaps. Do not edit the shared run ledger; the final handoff consolidates receipts. Add a regression that fails before each nontrivial change.\n\n- Let an extension command accept a validated provider and session ID so another extension can open AgentViz on a specific local session. Preserve the existing no argument Command Palette behavior. Resolve the target through the current catalogue/query path; never accept an arbitrary file path from command input.\n- Test both providers, absent/unknown IDs, unavailable source, malicious arguments, duplicate command execution and an already open panel. Reuse S03's exact ID lookup so an older session can be addressed.\n- Describe the command contract with synthetic examples. Do not alter the sibling AgentBoard checkout, install either extension or claim a live AgentBoard button was tested. If there is no current AgentBoard caller, record that seam as pending work in that project.\n- Accept when the command's actual VS Code host test passes, `unit` and `syntax` pass, and the source scope stays inside AgentViz.\n\nRuns alongside progress and possibly footprint. Own only the extension command, package manifest, README and your dedicated command tests. Do not modify src/transcript.js, media/, or another task receipt.",
+      "files": [
+        "src/extension.js",
+        "package.json",
+        "README.md",
+        "test/agentboard-entry.test.js",
+        "docs/development/agentviz-next/agentboard-entry.md"
+      ],
+      "avoid": [
+        "ORCHESTRATION.md",
+        "docs/development/2026-11-11-orchestration-format-audit.md",
+        ".agentboard/",
+        "workflows/agentviz-next.plan.json",
+        "workflows/agentviz-next.parallel.plan.json",
+        "docs/development/agentviz-next-run.md",
+        "docs/development/agentviz-next-parallel-run.md"
+      ],
+      "checks": [
+        "unit",
+        "syntax"
+      ],
+      "reply": "The commit id, changes made, regressions added, exact check commands and results, evidence locations, and anything blocked or unverified.",
+      "after": [
+        "lanes"
+      ]
+    },
+    {
+      "id": "footprint",
+      "title": "S06: Show a file activity footprint",
+      "source": "ORCHESTRATION.md",
+      "goal": "Implement S06: Show a file activity footprint.\n\nRead the Product contract and Boundaries in ORCHESTRATION.md, then implement only the named outcome. This is a Run a Plan worker: AgentBoard schedules, reviews and integrates the listed steps. Do not open extra cards, request another plan approval, or call finish self. Check git status/log first and preserve completed work. Use native Windows, synthetic fixtures and zero runtime dependencies. Keep prompts, raw payloads and secrets out of the view and evidence. Write only your own receipt at docs/development/agentviz-next/footprint.md with actual checks, evidence and gaps. Do not edit the shared run ledger; the final handoff consolidates receipts. Add a regression that fails before each nontrivial change.\n\n- Retain only safe file identity and short display labels from structured file tools. Show read/edit counts, a small ranked list and a marker after three recorded edits. Distinguish two different files with the same short label using an opaque key.\n- Do not parse arbitrary shell output or publish full paths, file contents, patch bodies or code. Test repeated edits, duplicate calls, failed calls, Windows/UNC/Unix path forms, missing paths, retained history truncation and child attribution.\n- State that the footprint covers recognized structured file tools and retained history. Keep the current empty state when no paths are available.\n- Accept when the footprint and station totals agree under the documented counting rule, privacy sentinels remain absent, and `unit` and `syntax` pass.\n\nA command worker may run concurrently. Keep edits inside your declared parser, renderer, stylesheet, dedicated tests and receipt. Do not modify src/extension.js, package.json or README.md.",
+      "files": [
+        "src/transcript.js",
+        "media/view.js",
+        "media/style.css",
+        "test/footprint.test.js",
+        "docs/development/agentviz-next/footprint.md"
+      ],
+      "avoid": [
+        "ORCHESTRATION.md",
+        "docs/development/2026-11-11-orchestration-format-audit.md",
+        ".agentboard/",
+        "workflows/agentviz-next.plan.json",
+        "workflows/agentviz-next.parallel.plan.json",
+        "docs/development/agentviz-next-run.md",
+        "docs/development/agentviz-next-parallel-run.md"
+      ],
+      "checks": [
+        "unit",
+        "syntax"
+      ],
+      "reply": "The commit id, changes made, regressions added, exact check commands and results, evidence locations, and anything blocked or unverified.",
+      "after": [
+        "progress"
+      ]
+    },
+    {
+      "id": "resilience",
+      "title": "S08: Check resilience and cost of the combined view",
+      "source": "ORCHESTRATION.md",
+      "goal": "Implement S08: Check resilience and cost of the combined view.\n\nRead the Product contract and Boundaries in ORCHESTRATION.md, then implement only the named outcome. This is a Run a Plan worker: AgentBoard schedules, reviews and integrates the listed steps. Do not open extra cards, request another plan approval, or call finish self. Check git status/log first and preserve completed work. Use native Windows, synthetic fixtures and zero runtime dependencies. Keep prompts, raw payloads and secrets out of the view and evidence. Write only your own receipt at docs/development/agentviz-next/resilience.md with actual checks, evidence and gaps. Do not edit the shared run ledger; the final handoff consolidates receipts. Add a regression that fails before each nontrivial change.\n\n- Measure discovery and append reads on representative synthetic histories. Record file/event/child counts, bytes read, elapsed time and responsiveness. Keep caps visible. Fix measured problems with the existing architecture; do not add a worker service or dependency on speculation.\n- Exercise partial writes, invalid timestamps, malformed/oversized records, replacement, sampled rewrites, source/configuration changes during reads, stale query responses, hidden panels, disposal and repeated reopen. Confirm updates do not reset filters or leak obsolete source metadata.\n- Probe the final host message for prompt, reasoning, command, output, raw path and secret sentinels. Inspect the CSP and package resource roots. Demonstrate Refresh recovering an edit between rewrite samples and keep that limitation documented.\n- Accept when focused regressions and `unit` and `syntax` pass, measured evidence is recorded, and no material unresolved correctness or privacy finding is hidden by a benchmark cap.",
+      "files": [
+        "src/sessions.js",
+        "src/transcript.js",
+        "src/extension.js",
+        "src/webview.js",
+        "media/app.js",
+        "media/view.js",
+        "media/style.css",
+        "test/resilience.test.js",
+        "test/privacy.test.js",
+        "test/sessions.test.js",
+        "test/transcript.test.js",
+        "test/extension.test.js",
+        "test/view.test.js",
+        "docs/development/agentviz-next/resilience.md"
+      ],
+      "avoid": [
+        "ORCHESTRATION.md",
+        "docs/development/2026-11-11-orchestration-format-audit.md",
+        ".agentboard/",
+        "workflows/agentviz-next.plan.json",
+        "workflows/agentviz-next.parallel.plan.json",
+        "docs/development/agentviz-next-run.md",
+        "docs/development/agentviz-next-parallel-run.md"
+      ],
+      "checks": [
+        "unit",
+        "syntax"
+      ],
+      "reply": "The commit id, changes made, regressions added, exact check commands and results, evidence locations, and anything blocked or unverified.",
+      "after": [
+        "footprint",
+        "agentboard-entry"
+      ]
+    },
+    {
+      "id": "windows-acceptance",
+      "title": "S09: Make Windows acceptance repeatable",
+      "source": "ORCHESTRATION.md",
+      "goal": "Implement S09: Make Windows acceptance repeatable.\n\nRead the Product contract and Boundaries in ORCHESTRATION.md, then implement only the named outcome. This is a Run a Plan worker: AgentBoard schedules, reviews and integrates the listed steps. Do not open extra cards, request another plan approval, or call finish self. Check git status/log first and preserve completed work. Use native Windows, synthetic fixtures and zero runtime dependencies. Keep prompts, raw payloads and secrets out of the view and evidence. Write only your own receipt at docs/development/agentviz-next/windows-acceptance.md with actual checks, evidence and gaps. Do not edit the shared run ledger; the final handoff consolidates receipts. Add a regression that fails before each nontrivial change.\n\n- Run a fresh VS Code development host using an isolated profile and synthetic source directories. Check open/reuse/close/reopen, workspace selection, name and full ID filtering, renamed sessions, a selected child, the AgentBoard entry command, no matches and source failures.\n- Inspect the emitted UI in a real browser at desktop and narrow widths. Check keyboard focus, accessible names, contrast, example/real distinction and absence of console/CSP errors. Use synthetic titles in screenshots.\n- Reuse the accepted P01 host runner and add integrated feature cases. Add its check to workflows/checks.json only after the command actually works. Keep the normal editor profile untouched.\n- Accept when `unit`, `syntax`, the actual host run and browser inspection all have separate receipts. Mark unavailable environments as unverified and keep the milestone open instead of asserting those checks passed.\n\nReuse the accepted host-harness runner. This is final GUI acceptance on the integrated feature set; the early harness calibration is not a substitute. You own the GUI lane for this stage.",
+      "files": [
+        "test/extension-host.js",
+        "test/run-extension-host.cjs",
+        "test/run-extension-host.test.js",
+        "test/browser-acceptance.test.js",
+        "package.json",
+        "workflows/checks.json",
+        "docs/development/agentviz-next-evidence.md",
+        "docs/development/agentviz-next/windows-acceptance.md"
+      ],
+      "avoid": [
+        "ORCHESTRATION.md",
+        "docs/development/2026-11-11-orchestration-format-audit.md",
+        ".agentboard/",
+        "workflows/agentviz-next.plan.json",
+        "workflows/agentviz-next.parallel.plan.json",
+        "docs/development/agentviz-next-run.md",
+        "docs/development/agentviz-next-parallel-run.md"
+      ],
+      "checks": [
+        "unit",
+        "syntax"
+      ],
+      "reply": "The commit id, changes made, regressions added, exact check commands and results, evidence locations, and anything blocked or unverified.",
+      "after": [
+        "resilience",
+        "host-harness"
+      ]
+    },
+    {
+      "id": "handoff",
+      "title": "S10: Independently review, package and hand off",
+      "source": "ORCHESTRATION.md",
+      "goal": "Implement S10: Independently review, package and hand off.\n\nRead the Product contract and Boundaries in ORCHESTRATION.md, then implement only the named outcome. This is a Run a Plan worker: AgentBoard schedules, reviews and integrates the listed steps. Do not open extra cards, request another plan approval, or call finish self. Check git status/log first and preserve completed work. Use native Windows, synthetic fixtures and zero runtime dependencies. Keep prompts, raw payloads and secrets out of the view and evidence. Write only your own receipt at docs/development/agentviz-next/handoff.md with actual checks, evidence and gaps. As the final handoff worker, you own docs/development/agentviz-next-parallel-run.md and must consolidate the other task receipts into it. The ledger prohibition applies only to other workers. Add a regression that fails before each nontrivial change.\n\n- Inspect the integrated changes against the product contract and adversarial workspace/name/ID cases. Fix reproduced material findings within scope with regression tests. AgentBoard's native review model independently reviews each delivery, including this one; do not allocate separate reviewer cards.\n- Run `unit`, `syntax` and `package`. Inspect the actual VSIX inclusion set and checksum; omit transcripts, private source metadata, ignored evidence, development dependencies and orchestration material. Do not manufacture a green host receipt from Node unit test results.\n- Update current behavior, source coverage, launch instructions, evidence locations and remaining limitations. Record child/review card IDs, delivered commits and the final integration commit in the execution record.\n- Accept when prior outcomes are accepted and this release is ready for native review, required checks have completed, a local VSIX exists, and the handoff clearly distinguishes implemented, verified and deferred work. Leave publication, normal profile installation, remote push and cross project caller changes unexecuted.\n\nConsolidate all eleven task receipts, including host-harness, into the shared run ledger. Preserve the distinction between the saved revised graph and any older run that was already allocated.",
+      "files": [
+        "README.md",
+        "HANDOFF.md",
+        "docs/development/agentviz-next-evidence.md",
+        "docs/development/agentviz-next-parallel-run.md",
+        "package.json",
+        ".vscodeignore",
+        "docs/development/agentviz-next/handoff.md"
+      ],
+      "avoid": [
+        "ORCHESTRATION.md",
+        "docs/development/2026-11-11-orchestration-format-audit.md",
+        ".agentboard/",
+        "workflows/agentviz-next.plan.json",
+        "workflows/agentviz-next.parallel.plan.json",
+        "docs/development/agentviz-next-run.md"
+      ],
+      "checks": [
+        "unit",
+        "syntax",
+        "package"
+      ],
+      "reply": "The commit id, changes made, regressions added, exact check commands and results, evidence locations, and anything blocked or unverified.",
+      "after": [
+        "windows-acceptance"
+      ]
+    }
+  ]
+}

@@ -12,6 +12,8 @@ Why (Robert): long-horizon tasks are complex and hard to keep track of. Reading 
 
 The run **AgentViz: find and follow sessions** (`workflows/agentviz-next.plan.json`, plan card `a40b39`) has run all ten steps. S01 to S09 are integrated on the plan branch `task/a40b39` (head `e56805a`). S10, the release step, is delivered on `task/05f15f` and waits for the board's review and integration. Nothing was published, pushed, installed in the normal editor profile or changed in AgentBoard. Those are yours to decide.
 
+A parallel version of the same batch is also prepared: `workflows/agentviz-next.parallel.plan.json`, listed by AgentBoard's **Run a Plan** picker as **AgentViz: parallel find and follow sessions**. `ORCHESTRATION.md` is its supporting product brief. The JSON file supplies the schedule, dependencies, checks and native model review. `docs/development/agentviz-next-parallel-run.md` records that no parallel run has started. Its scope (project/workspace, session name, session ID, with filtering, and the later steps) is the work this run already delivered, so check before launching it. The corrected format audit is in `docs/development/2026-11-11-orchestration-format-audit.md`.
+
 The three lists below are deliberately separate. "Implemented" is not "verified".
 
 ### Implemented
