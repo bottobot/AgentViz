@@ -8,3 +8,6 @@ HANDOFF.md
 *.code-workspace
 package-lock.json
 .gitignore
+ORCHESTRATION.md
+workflows/**
+.agentboard/**

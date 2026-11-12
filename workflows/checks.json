@@ -1,0 +1,17 @@
+{
+  "unit": {
+    "run": "npm test",
+    "what": "AgentViz Node tests, including parser, discovery, view and host message regressions. This does not prove browser or VS Code GUI acceptance.",
+    "minutes": 2
+  },
+  "syntax": {
+    "run": "npm run check",
+    "what": "Syntax checks for the production JavaScript files named by the existing script.",
+    "minutes": 1
+  },
+  "package": {
+    "run": "npm run package",
+    "what": "Build a local AgentViz VSIX using the locked development tool. Does not install, publish or push it. Inspect the archive separately.",
+    "minutes": 2
+  }
+}
