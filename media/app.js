@@ -30,6 +30,13 @@
   // Filter requests to the host are numbered. An answer is used only when it carries the newest number.
   let seq = 1;
   let answered = 0;
+  // Two host forms are understood while the host work is joined. A host that acknowledges requests with
+  // queryRequestId is sent {type: "query", requestId, workspaceKey, name, sessionId} and answers by that number.
+  // A host that has not done so keeps the older request and answer form, so its snapshots still work.
+  let agreed = false;
+  let sent = 0;
+  // The last catalogue entry seen for the followed session. An answer that leaves it out does not unname it.
+  let remembered = null;
   if (!api) {
     const sessions = AgentViz.demoCatalogue(Date.now());
     state = { ...state, sessions, selectedId: sessions[0].id };
@@ -38,6 +45,21 @@
   const send = message => { if (api) api.postMessage(message); };
   const request = () => ({ seq, workspaceKey: filters.workspaceKey, name: text(filters.name).trim(), id: text(filters.id).trim() });
   const whole = value => Number.isInteger(value) && value >= 0 ? value : 0;
+  const active = () => Boolean(filters.workspaceKey || text(filters.name).trim() || text(filters.id).trim());
+  function ask() {
+    const query = request();
+    if (!agreed) { send({ type: 'query', ...query }); return; }
+    sent = seq;
+    send({ type: 'query', requestId: seq, workspaceKey: query.workspaceKey, name: query.name, sessionId: query.id });
+  }
+  // A catalogue entry from before workspaces and saved names existed still gets a truthful label, never "undefined".
+  function entry(value) {
+    if (!value || typeof value !== 'object' || typeof value.id !== 'string') return null;
+    if (typeof value.workspaceKey === 'string' && typeof value.workspaceLabel === 'string' && typeof value.name === 'string' && typeof value.sessionId === 'string') return value;
+    const known = field => typeof value[field] === 'string' && value[field] ? value[field] : '';
+    return { ...value, sessionId: known('sessionId') || value.id, workspaceKey: known('workspaceKey') || 'ws:unknown',
+      workspaceLabel: known('workspaceLabel') || known('project') || 'Unknown workspace', name: known('name') || 'Unnamed session' };
+  }
   const persist = () => { if (api) api.setState({ example, workspaceKey: filters.workspaceKey, workspaceLabel, name: text(filters.name), id: text(filters.id) }); };
   const setText = (node, value) => { if (node.textContent !== value) node.textContent = value; };
   // Typed text is restored once, here. After this the controller reads the inputs and never writes them during a refresh.
@@ -64,14 +86,17 @@
   // The host answers with the matches for the current filters, newest first and cut to its limit. The followed
   // session travels separately, so it stays identified when the filters or the limit leave it out of that list.
   function listed() {
-    const followed = state.selected && state.selected.id === state.selectedId ? state.selected : null;
+    const followed = state.selected && state.selected.id === state.selectedId ? state.selected : remembered && remembered.id === state.selectedId ? remembered : null;
     return followed && !state.sessions.some(session => session.id === followed.id) ? [...state.sessions, followed] : state.sessions;
   }
 
   // Project groups come from the host for every session it found, not from the returned list.
   function projectChoices(sessions) {
-    if (!Array.isArray(state.workspaces)) return AgentViz.workspaceChoices(sessions);
-    const choices = state.workspaces.map(group => ({ key: String(group.key), label: String(group.label || 'Unknown workspace'), count: whole(group.count) }));
+    // Sessions without a known project are one group under one plain label, whatever older label each carries.
+    if (!Array.isArray(state.workspaces)) return AgentViz.workspaceChoices(sessions).map(choice => choice.key === 'ws:unknown' ? { ...choice, label: 'Unknown workspace' } : choice);
+    // The agreed group is {key, label}. A count is shown only when the host sends one.
+    const choices = state.workspaces.filter(group => group && typeof group === 'object' && typeof group.key === 'string')
+      .map(group => ({ key: group.key, label: typeof group.label === 'string' && group.label ? group.label : 'Unknown workspace', count: Number.isInteger(group.count) && group.count >= 0 ? group.count : null }));
     const uses = new Map();
     for (const choice of choices) uses.set(choice.label.toLowerCase(), (uses.get(choice.label.toLowerCase()) || 0) + 1);
     // Different directories that still share a label are told apart by a fragment of their opaque key.
@@ -82,7 +107,7 @@
   function paintWorkspaces(sessions, total) {
     const choices = projectChoices(sessions);
     const chosen = choices.find(choice => choice.key === filters.workspaceKey);
-    const wanted = [{ value: '', text: `All projects (${total})` }, ...choices.map(choice => ({ value: choice.key, text: `${choice.label} (${choice.count})` }))];
+    const wanted = [{ value: '', text: total === null ? 'All projects' : `All projects (${total})` },...choices.map(choice => ({ value: choice.key, text: choice.count === null ? choice.label : `${choice.label} (${choice.count})` }))];
     if (chosen && chosen.label !== workspaceLabel) { workspaceLabel = chosen.label; persist(); }
     // A chosen project with no listed sessions stays chosen and says so, instead of quietly widening to all projects.
     if (filters.workspaceKey && !chosen) wanted.push({ value: filters.workspaceKey, text: `${workspaceLabel || 'Saved project'} (not in the current list)` });
@@ -101,10 +126,14 @@
     const matched = Math.max(whole(lookup.matched), nav.matches.length);
     const pendingNames = whole(lookup.pendingNames);
     const pendingWorkspaces = whole(lookup.pendingWorkspaces);
-    paintWorkspaces(sessions, total);
+    // An answer in the agreed form carries no source total, and its list is already filtered. Without a total from
+    // the host the page states what is listed and never presents the size of a filtered list as the size of the source.
+    const counted = !agreed || whole(lookup.total) > 0;
+    const none = !total && (counted || !nav.active);
+    paintWorkspaces(sessions, counted ? total : null);
 
     const placeholder = waiting && !nav.matches.length ? 'Looking up sessions…'
-      : !total ? 'No local sessions found'
+      : none ? 'No local sessions found'
       : !nav.matches.length ? (pendingNames || pendingWorkspaces ? 'No matches yet. Still reading sessions…' : 'No sessions match these filters')
       : exampleOverLive ? 'Example shown. Choose a session to follow it'
       : !nav.selected ? 'Choose a session'
@@ -121,8 +150,9 @@
     clearButton.disabled = !nav.active;
     // The status line always says how much of the source the list covers: lookup, limit and unread parts included.
     const notes = [waiting ? 'Looking up sessions…'
-      : !total ? ''
-      : !nav.matches.length ? `No sessions match${pendingNames || pendingWorkspaces ? ' yet' : ''}. Clear filters to see all ${total}.`
+      : none ? ''
+      : !nav.matches.length ? `No sessions match${pendingNames || pendingWorkspaces ? ' yet' : ''}. Clear filters to see ${counted ? `all ${total}` : 'every session'}.`
+      : !counted ? (nav.active ? `${matched} ${matched === 1 ? 'session matches' : 'sessions match'}.` : `${total} sessions listed.`)
       : nav.active ? `${matched} of ${total} sessions match.` : `${total} sessions found.`];
     if (!waiting && matched > state.sessions.length && state.sessions.length) notes.push(`Showing the ${state.sessions.length} most recently written${nav.active ? ' matches' : ''}. Choose a project or narrow the search to reach older ones.`);
     if (pendingNames) notes.push(`Still reading saved names in ${pendingNames} sessions; more matches may appear.`);
@@ -157,7 +187,7 @@
     filters = { ...filters, ...next };
     seq++;
     persist();
-    send({ type: 'query', ...request() });
+    ask();
     paint();
   }
 
@@ -188,12 +218,27 @@
   }
 
   window.addEventListener('message', event => {
-    if (!api || event.data?.type !== 'state' || !Array.isArray(event.data.sessions)) return;
+    const data = event.data;
+    if (!api || data?.type !== 'state' || !Array.isArray(data.sessions)) return;
     // An answer to filters that have since changed is dropped whole, so an old list never appears under new filters.
-    const answer = event.data.lookup && Number.isInteger(event.data.lookup.seq) ? event.data.lookup.seq : seq;
-    if (answer !== seq) return;
+    if (Number.isSafeInteger(data.queryRequestId) && data.queryRequestId >= 0) {
+      if (!agreed) {
+        agreed = true;
+        // Filters restored from saved state have not been asked in the agreed form yet. Zero acknowledges no filters.
+        if (active()) ask();
+      }
+      if (data.queryRequestId !== sent) return;
+    } else {
+      if (agreed) return;
+      const answer = data.lookup && Number.isInteger(data.lookup.seq) ? data.lookup.seq : seq;
+      if (answer !== seq) return;
+    }
     answered = seq;
-    state = event.data;
+    const selectedId = typeof data.selectedId === 'string' ? data.selectedId : '';
+    state = { ...data, selectedId, sessions: data.sessions.map(entry).filter(Boolean), selected: entry(data.selected), snapshot: data.snapshot || null, warnings: Array.isArray(data.warnings) ? data.warnings : [] };
+    const seen = (state.selected && state.selected.id === selectedId && state.selected) || state.sessions.find(session => session.id === selectedId);
+    if (seen) remembered = seen;
+    else if (remembered && remembered.id !== selectedId) remembered = null;
     paint();
   });
   workspace.addEventListener('change', () => {
@@ -224,7 +269,8 @@
     const id = picker.value;
     if (!id) return;
     if (api) example = false;
-    state = { ...state, selectedId: id, selected: listed().find(session => session.id === id) || null, snapshot: null };
+    remembered = listed().find(session => session.id === id) || null;
+    state = { ...state, selectedId: id, selected: remembered, snapshot: null };
     persist();
     send({ type: 'select', id });
     paint();
