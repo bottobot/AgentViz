@@ -1,0 +1,10 @@
+.git/**
+.vscode/**
+node_modules/**
+artifacts/**
+test/**
+docs/**
+HANDOFF.md
+*.code-workspace
+package-lock.json
+.gitignore

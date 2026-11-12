@@ -1,0 +1,63 @@
+{
+  "name": "agent-viz",
+  "displayName": "AgentViz",
+  "description": "A local, live picture of Claude Code and Codex sessions in an editor tab.",
+  "version": "0.1.0",
+  "publisher": "agentviz-local",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Visualization"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onCommand:agentviz.open"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "agentviz.open",
+        "title": "AgentViz: Open Activity"
+      }
+    ],
+    "configuration": {
+      "title": "AgentViz",
+      "properties": {
+        "agentviz.claudeRoot": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Claude configuration folder. Empty uses the local .claude folder. Only its projects folder is read."
+        },
+        "agentviz.codexRoot": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Codex configuration folder. Empty uses the local .codex folder. Only its sessions folder is read."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check src/extension.js && node --check src/transcript.js && node --check src/sessions.js && node --check src/webview.js && node --check media/view.js && node --check media/app.js",
+    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "4.1.0"
+  },
+  "overrides": {
+    "@vscode/vsce": { "minimatch": "^11.0.8" }
+  }
+}
