@@ -11,9 +11,22 @@ function webviewHtml({ css, view, app, cspSource }) {
 <title>AgentViz</title><link rel="stylesheet" href="${attribute(css)}"></head>
 <body><nav class="toolbar" aria-label="Session controls">
 <div class="brand"><span class="brand-mark" aria-hidden="true">◎</span>AgentViz</div>
-<label class="picker-label" for="session">SESSION</label><select id="session" aria-label="Session"><option value="">Finding local sessions…</option></select>
 <div class="spacer"></div><button id="refresh" type="button">Refresh</button><button id="example" type="button">Show example</button>
-</nav><div id="connection" class="toolbar-note" role="status" aria-live="polite"></div><main id="content" aria-label="Session activity"></main>
+</nav><section class="finder" role="search" aria-label="Find a session">
+<div class="field"><label class="field-label" for="workspace">Project / workspace</label><select id="workspace"><option value="">All projects</option></select></div>
+<div class="field"><label class="field-label" for="name-filter">Session name</label><input id="name-filter" type="search" autocomplete="off" spellcheck="false" maxlength="200" placeholder="Any name"></div>
+<div class="field"><label class="field-label" for="id-filter">Session ID (optional)</label><input id="id-filter" type="search" autocomplete="off" spellcheck="false" maxlength="200" placeholder="Full or partial ID"></div>
+<div class="field field-action"><button id="clear-filters" type="button" disabled>Clear filters</button></div>
+<div class="field field-wide"><label class="field-label" for="session">Session</label><select id="session"><option value="">Finding local sessions…</option></select></div>
+<p id="matches" class="finder-note" role="status" aria-live="polite"></p>
+</section><section id="selection" class="selection" aria-label="Followed session" hidden>
+<span class="selection-part"><span class="selection-key">Project</span><span id="selected-workspace"></span></span>
+<span class="selection-part"><span class="selection-key">Name</span><span id="selected-name"></span></span>
+<span class="selection-part"><span class="selection-key">ID</span><code id="selected-id" class="selection-id"></code><button id="copy-id" type="button" aria-label="Copy full session ID">Copy ID</button></span>
+<span id="selected-provider" class="selection-detail"></span>
+<span id="copy-status" class="selection-detail" role="status" aria-live="polite"></span>
+<span id="selection-note" class="selection-note" role="status" aria-live="polite"></span>
+</section><div id="connection" class="toolbar-note" role="status" aria-live="polite"></div><main id="content" aria-label="Session activity"></main>
 <script nonce="${nonce}" src="${attribute(view)}"></script><script nonce="${nonce}" src="${attribute(app)}"></script></body></html>`;
 }
 

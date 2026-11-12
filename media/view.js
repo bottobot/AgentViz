@@ -101,9 +101,74 @@
       <time>${clock(event.time)}</time></li>`).join('');
   }
 
+  // Navigation (S02). These work on the catalogue the host sends; they never see paths or transcript content.
+  const needle = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
+  const providerName = provider => provider === 'claude' ? 'Claude' : 'Codex';
+
+  function filterSessions(sessions, filters = {}) {
+    const name = needle(filters.name);
+    const id = needle(filters.id);
+    const workspaceKey = typeof filters.workspaceKey === 'string' ? filters.workspaceKey : '';
+    return sessions.filter(session => (!workspaceKey || session.workspaceKey === workspaceKey)
+      && (!name || String(session.name ?? '').toLowerCase().includes(name))
+      && (!id || String(session.sessionId ?? '').toLowerCase().includes(id)));
+  }
+
+  // The selected entry is looked up in the whole catalogue, never in the matches, so a filter cannot swap it.
+  function navigate(sessions, filters = {}, selectedId = '') {
+    const matches = filterSessions(sessions, filters);
+    const selected = (selectedId && sessions.find(session => session.id === selectedId)) || null;
+    return {
+      matches, selected,
+      excluded: Boolean(selected) && !matches.includes(selected),
+      active: Boolean(filters.workspaceKey || needle(filters.name) || needle(filters.id))
+    };
+  }
+
+  function workspaceChoices(sessions) {
+    const byKey = new Map();
+    for (const session of sessions) {
+      const choice = byKey.get(session.workspaceKey) || { key: session.workspaceKey, label: String(session.workspaceLabel || 'Unknown workspace'), count: 0 };
+      choice.count++;
+      byKey.set(session.workspaceKey, choice);
+    }
+    const choices = [...byKey.values()];
+    const uses = new Map();
+    for (const choice of choices) uses.set(choice.label, (uses.get(choice.label) || 0) + 1);
+    // Different directories that still share a label are told apart by a fragment of their opaque key.
+    for (const choice of choices) if (uses.get(choice.label) > 1) choice.label = `${choice.label} · ${String(choice.key).slice(3, 9)}`;
+    return choices.sort((a, b) => a.label.localeCompare(b.label) || String(a.key).localeCompare(String(b.key)));
+  }
+
+  // Eight characters where that is enough to tell sessions apart, otherwise as many as it takes.
+  function idLabels(sessions) {
+    const lower = sessions.map(session => String(session.sessionId).toLowerCase());
+    const labels = new Map();
+    sessions.forEach((session, index) => {
+      const full = String(session.sessionId);
+      let length = Math.min(8, full.length);
+      while (length < full.length && lower.some((other, at) => at !== index && other !== lower[index] && other.startsWith(lower[index].slice(0, length)))) length++;
+      labels.set(session.id, length >= full.length - 3 ? full : `${full.slice(0, length)}…`);
+    });
+    return labels;
+  }
+
+  function sessionLabel(session, idLabel) {
+    return `${session.workspaceLabel} › ${session.name} · ${idLabel || session.sessionId} · ${providerName(session.provider)}${session.child ? ' subagent' : ''} · ${clock(session.modified)}`;
+  }
+
+  function identityHeading(identity, example, detail) {
+    return `<div><div class="eyebrow">${example ? 'SYNTHETIC EXAMPLE' : 'LOCAL SESSION'} · PROJECT</div>
+      <p class="session-workspace">${escape(identity.workspaceLabel)}</p><h1>${escape(identity.name)}</h1>
+      <p class="session-caption">ID <span class="session-id">${escape(identity.sessionId)}</span> · ${identity.provider === 'claude' ? 'Claude Code' : 'Codex'}${identity.child ? ' · subagent' : ''}${detail ? ` · ${detail}` : ''}</p></div>`;
+  }
+
   function render(session, options = {}) {
+    if (!session && options.identity) return `<header class="session-heading">${identityHeading(options.identity, false, '')}<span class="status"><span aria-hidden="true"></span>Loading history</span></header>
+      <section class="empty"><span class="eyebrow">WAITING FOR A SIGNAL</span><p>Activity for this session has not arrived yet.</p><p class="muted">If this stays empty, press Refresh or choose another session.</p></section>`;
     if (!session) return `<section class="empty"><span class="eyebrow">WAITING FOR A SIGNAL</span><h1>No session selected</h1><p>Choose a session above to see where the work is going.</p><p class="muted">Run Claude Code or Codex locally, then refresh. You can also explore the example session.</p></section>`;
     const now = options.now ?? Date.now();
+    const identity = options.identity || { workspaceLabel: session.project || 'Unknown workspace', name: 'Unnamed session', sessionId: session.id, provider: session.provider, child: Boolean(session.parent) };
     const summary = summarize(session.events);
     const age = now - session.updatedAt;
     const quiet = age >= 30000;
@@ -114,8 +179,7 @@
     if (session.invalidLines) warnings.push(`${session.invalidLines} malformed records skipped.`);
     if (session.oversizedLines) warnings.push(`${session.oversizedLines} records above the 4 MB line limit skipped.`);
     if (session.droppedEvents) warnings.push(`Showing the latest 10000 events; ${session.droppedEvents} earlier events omitted.`);
-    return `<header class="session-heading"><div><div class="eyebrow">${options.example ? 'SYNTHETIC EXAMPLE' : `${escape(session.provider === 'claude' ? 'CLAUDE CODE' : 'CODEX')} / LOCAL SESSION`}</div>
-      <h1>${escape(session.project || 'Untitled session')}</h1><p class="session-caption">${options.example ? 'A sample run through explore, edit and verify.' : `Session ${escape(session.id.slice(0, 8))}${session.parent ? ' · subagent' : ''} · Last record ${elapsed(age)} ago`}</p></div>
+    return `<header class="session-heading">${identityHeading(identity, options.example, options.example ? 'A sample run through explore, edit and verify.' : `Last record ${elapsed(age)} ago`)}
       <span class="status ${!quiet && session.status === 'active' && !options.example ? 'receiving' : ''}"><span aria-hidden="true"></span>${status}</span></header>
       ${warnings.length ? `<aside class="notice" role="status">${warnings.map(escape).join(' ')}</aside>` : ''}
       <div class="workspace-grid"><section class="map-panel panel"><div class="panel-heading"><h2>Where the work went</h2><span>FIXED STATIONS</span></div>${map(summary, activeKind)}
@@ -141,7 +205,26 @@
     return { provider: 'claude', id: 'example-session', project: 'AgentViz', parent: null, events, updatedAt: events.at(-1).time, status: 'active', context: 66, invalidLines: 0, oversizedLines: 0, droppedEvents: 0 };
   }
 
-  const api = { summarize, activityBuckets, render, demoSession };
+  const demoIdentity = { workspaceLabel: 'AgentViz', name: 'Example session', sessionId: 'example-session', provider: 'claude', child: false };
+
+  // Made-up sessions for the page when it runs without a host: two projects share a title, and two IDs share a prefix.
+  function demoCatalogue(now = Date.now()) {
+    const workspace = letter => `ws:${letter.repeat(20)}`;
+    const rows = [
+      ['claude', '5e1f0a2b-3c4d-4e5f-8a6b-7c8d9e0f1a2b', '1', 'example-shop', 'Fix checkout rounding', false],
+      ['codex', '5e1f0a2b-3c4d-4e5f-8a6b-7c8d9e0f1a99', '1', 'example-shop', 'Fix checkout rounding', false],
+      ['claude', 'a7b8c9d0-1e2f-4a3b-9c4d-5e6f7a8b9c0d', '2', 'example-docs', 'Rewrite install guide', false],
+      ['codex', '0b1c2d3e-4f5a-4b6c-8d7e-8f9a0b1c2d3e', '2', 'example-docs', 'Fix checkout rounding', false],
+      ['claude', 'c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f', '3', 'example-tools', 'Unnamed session', false],
+      ['claude', 'f9e8d7c6-b5a4-4f3e-8d2c-1b0a9f8e7d6c', '3', 'example-tools', 'Unnamed session', true]
+    ];
+    return rows.map(([provider, sessionId, key, workspaceLabel, name, child], index) => ({
+      id: `demo:${index}`, sessionId, provider, project: workspaceLabel, child, modified: now - index * 7 * 60000,
+      workspaceKey: workspace(key), workspaceLabel, name, nameSource: name === 'Unnamed session' ? 'none' : 'custom'
+    }));
+  }
+
+  const api = { summarize, activityBuckets, render, demoSession, demoCatalogue, demoIdentity, filterSessions, navigate, workspaceChoices, idLabels, sessionLabel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.AgentViz = api;
 })(typeof globalThis === 'undefined' ? this : globalThis);
