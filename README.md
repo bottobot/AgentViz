@@ -2,7 +2,7 @@
 
 A live picture of local Claude Code and Codex sessions in a separate VS Code editor tab.
 
-The next batch is available in AgentBoard's **Run a Plan** list as **AgentViz: find and follow sessions**, from `workflows/agentviz-next.plan.json`. It starts with project/workspace, session name and session ID filtering. `ORCHESTRATION.md` supplies the product brief, and `docs/development/agentviz-next-run.md` tracks the prepared, not launched state. These planned features are not part of the current first slice yet.
+The next batch is available in AgentBoard's **Run a Plan** list as **AgentViz: parallel find and follow sessions**, from `workflows/agentviz-next.parallel.plan.json`. It starts with project/workspace, session name and session ID filtering. `ORCHESTRATION.md` supplies the product brief, and `docs/development/agentviz-next-parallel-run.md` tracks the prepared, not launched state. These planned features are not part of the current first slice yet.
 
 The first version provides a session picker, a fixed stations map, category counts, a context meter when the source reports one, a thirty minute activity strip, and folded recent events. An example session lets you explore the view without displaying real session activity.
 

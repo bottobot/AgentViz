@@ -2,7 +2,7 @@
 
 **Goal:** Make long coding sessions easy to find by project or workspace, then session name, then session ID, and easy to follow through truthful activity, agent lanes, task progress and file activity.
 
-**Execution:** In AgentBoard, choose Run a Plan and select `AgentViz: find and follow sessions` from `workflows/agentviz-next.plan.json`. That schema compliant file is the executable schedule. This Markdown is the supporting product brief; it does not instruct workers to create cards or submit another orchestrator plan.
+**Execution:** In AgentBoard, choose Run a Plan and select `AgentViz: parallel find and follow sessions` from `workflows/agentviz-next.parallel.plan.json`. That schema compliant file is the executable schedule. This Markdown is the supporting product brief; it does not instruct workers to create cards or submit another orchestrator plan.
 
 **Architecture:** Extend the current Node builtin transcript adapters and plain SVG webview. Keep source collection in the extension host and send only approved display metadata and normalized events to the view. Retain a separate VS Code extension and the existing read only data flow.
 
@@ -36,6 +36,35 @@ Reuse the existing adapters, renderer, settings, tests and package script. Add a
 
 Defer Linux/VSCodium verification, remote machines, replay/scrubbing, game worlds, 3D, new cloud providers, account autodiscovery and changes inside AgentBoard. An AgentViz command that can be called by AgentBoard is in scope; modifying AgentBoard to call it is a separate project change.
 
+## Parallel interface contract
+
+Metadata, filter UI and host harness preparation have no prerequisite and own disjoint files. They implement the following fixed interface; do not invent competing field names. Preserve the current project field and legacy snapshots until the joining discovery task accepts the combined behavior.
+
+A session catalogue entry contains the existing id, sessionId, provider, child and modified fields plus workspaceKey, workspaceLabel, name and nameSource. Keys and IDs are strings, modified is a timestamp number, child is boolean, and display labels/names are bounded plain strings. Workspace keys are opaque stable identities derived in the host; labels are short and disambiguated. Missing stored names use Unnamed session.
+
+The frontend sends {type: "query", requestId, workspaceKey, name, sessionId}. requestId is a monotonically increasing nonnegative integer within the webview; filter values are strings and empty means unfiltered. The host's normal state response carries queryRequestId equal to the last accepted requestId and workspaces: [{key, label}] in addition to the existing sessions, selectedId, snapshot and warnings fields. Before any query the acknowledged ID is zero. Reject malformed queries at the host boundary. The UI ignores stale query responses, keeps typed filters/focus, and tolerates a legacy response without the new fields while independent work is in progress. Discovery owns the final host implementation and combined acceptance after both initial workers are reviewed.
+
+Concurrent workers write only docs/development/agentviz-next/<step-id>.md. Do not edit the common run ledger or each other's receipts. The handoff task consolidates receipts. The JSON files list exact writable files; broad test directory ownership is removed. A dependency remains between tasks that write the same parser, renderer or stylesheet. Parallelism is verified on every unordered task pair, including file and parent-directory overlap.
+
+## Execution graph
+
+The board follows after edges; it does not infer which edges to remove. The graph permits up to three workers at once, subject to the live board's session/account limits and its reviewer. It makes no measured wall time claim.
+
+```mermaid
+flowchart LR
+  M[Metadata] --> D[Join navigation and discovery]
+  F[Filter UI] --> D
+  D --> L[Agent lanes]
+  L --> P[Task progress]
+  P --> T[File footprint]
+  L --> E[AgentBoard command]
+  T --> R[Resilience]
+  E --> R
+  H[Windows harness preparation] --> W[Integrated Windows acceptance]
+  R --> W
+  W --> O[Review and package]
+```
+
 ## Steps
 
 1. **S01: Identify workspaces and saved session names.** Owner: metadata worker. Depends on: none. Own: `src/sessions.js`, `src/transcript.js`, `src/extension.js`, `test/sessions.test.js`, `test/transcript.test.js`, `test/extension.test.js` and a focused metadata fixture if needed.
@@ -44,13 +73,13 @@ Defer Linux/VSCodium verification, remote machines, replay/scrubbing, game world
     - Extend discovery and the host message whitelist. Keep title text short, strip controls and escape it at the display boundary. Return `Unnamed session` on a missing title. Metadata lookup must not change CLI state or credentials.
     - Accept when both providers carry tested workspace/name/ID metadata to the webview, private payload sentinels stay absent, and `unit` and `syntax` pass. Return source shape notes, changed files, commit and check results.
 
-2. **S02: Add workspace, name and ID filtering.** Owner: navigation worker. Depends on: S01 accepted and integrated. Own: `media/app.js`, `media/view.js`, `media/style.css`, `src/webview.js`, `test/view.test.js` and a focused browser/controller test.
-    - Consume S01's catalogue fields. Add labelled project/workspace selection, name search and optional ID search. Match names and IDs case insensitively; trim surrounding whitespace. Display workspace first, then name, then ID, with provider as supporting detail. Include a usable full ID copy action.
+2. **S02: Add workspace, name and ID filtering.** Owner: navigation worker. Depends on: none; use the frozen interface below. Own: `media/app.js`, `media/view.js`, `media/style.css`, `src/webview.js`, `test/view.test.js` and a focused browser/controller test.
+    - Build against the frozen interface with synthetic snapshots while S01 runs concurrently. Add labelled project/workspace selection, name search and optional ID search. Match names and IDs case insensitively; trim surrounding whitespace. Display workspace first, then name, then ID, with provider as supporting detail. Include a usable full ID copy action.
     - Test intersection of filters, duplicate names, exact and partial IDs beyond the first eight characters, no matches, clearing filters, malicious title text, example mode, keyboard operation and a narrow viewport. Use the current catalogue as the first navigation test boundary; S03 supplies complete host lookup coverage before this milestone is considered delivered.
     - Clear or explicitly preserve selection when filters exclude it; never display another session under the selected label. Preserve input focus and typed text during background refreshes. Persist only nonsecret UI preferences through the existing webview state mechanism.
     - Accept when the requested navigation order works on synthetic provider data and `unit` and `syntax` pass. Return screenshots or DOM evidence, commit and exact behavior on an excluded selection.
 
-3. **S03: Make discovery and selection cover the requested project.** Owner: discovery worker. Depends on: S02 accepted and integrated. Own: `src/sessions.js`, `src/extension.js`, `media/app.js`, related existing tests and a focused catalogue test if needed.
+3. **S03: Make discovery and selection cover the requested project.** Owner: discovery worker. Depends on: S01 and S02 accepted and integrated. Own: `src/sessions.js`, `src/extension.js`, `media/app.js`, related existing tests and a focused catalogue test if needed.
     - Complete the host query contract used by the filters. Return project groups independently of the recent session response cap; filter project/name/ID before limiting matches. Cache metadata only where measurements show repeated unnecessary reads. Do not reread every full transcript once per second.
     - Test a selected project older than 80 newer sessions, a matching full ID outside the recent list, duplicate workspace labels, a rename, deletion, no matches and stale query/configuration responses arriving out of order. Validate IDs against the current source generation and keep the selected source stable during ordinary refreshes.
     - Preserve malformed record counts, sampled rewrite recovery, partial UTF8 and pending JSON behavior. Show a visible lookup/loading/limit state instead of silently returning an incomplete global list.
@@ -74,19 +103,19 @@ Defer Linux/VSCodium verification, remote machines, replay/scrubbing, game world
     - State that the footprint covers recognized structured file tools and retained history. Keep the current empty state when no paths are available.
     - Accept when the footprint and station totals agree under the documented counting rule, privacy sentinels remain absent, and `unit` and `syntax` pass.
 
-7. **S07: Provide a narrow AgentBoard entry point.** Owner: integration worker. Depends on: S06 accepted and integrated. Own: `src/extension.js`, `package.json`, focused host tests and `README.md`.
+7. **S07: Provide a narrow AgentBoard entry point.** Owner: integration worker. Depends on: S04 accepted and integrated; may run alongside S05 and S06. Own: `src/extension.js`, `package.json`, focused host tests and `README.md`.
     - Let an extension command accept a validated provider and session ID so another extension can open AgentViz on a specific local session. Preserve the existing no argument Command Palette behavior. Resolve the target through the current catalogue/query path; never accept an arbitrary file path from command input.
     - Test both providers, absent/unknown IDs, unavailable source, malicious arguments, duplicate command execution and an already open panel. Reuse S03's exact ID lookup so an older session can be addressed.
     - Describe the command contract with synthetic examples. Do not alter the sibling AgentBoard checkout, install either extension or claim a live AgentBoard button was tested. If there is no current AgentBoard caller, record that seam as pending work in that project.
     - Accept when the command's actual VS Code host test passes, `unit` and `syntax` pass, and the source scope stays inside AgentViz.
 
-8. **S08: Check resilience and cost of the combined view.** Owner: reliability worker. Depends on: S07 accepted and integrated. Own: targeted fixes in the current host/adapters/view, focused tests and the execution evidence record.
+8. **S08: Check resilience and cost of the combined view.** Owner: reliability worker. Depends on: S06 and S07 accepted and integrated. Own: targeted fixes in the current host/adapters/view, focused tests and the execution evidence record.
     - Measure discovery and append reads on representative synthetic histories. Record file/event/child counts, bytes read, elapsed time and responsiveness. Keep caps visible. Fix measured problems with the existing architecture; do not add a worker service or dependency on speculation.
     - Exercise partial writes, invalid timestamps, malformed/oversized records, replacement, sampled rewrites, source/configuration changes during reads, stale query responses, hidden panels, disposal and repeated reopen. Confirm updates do not reset filters or leak obsolete source metadata.
     - Probe the final host message for prompt, reasoning, command, output, raw path and secret sentinels. Inspect the CSP and package resource roots. Demonstrate Refresh recovering an edit between rewrite samples and keep that limitation documented.
     - Accept when focused regressions and `unit` and `syntax` pass, measured evidence is recorded, and no material unresolved correctness or privacy finding is hidden by a benchmark cap.
 
-9. **S09: Make Windows acceptance repeatable.** Owner: validation worker, with exclusive use of the GUI lane. Depends on: S08 accepted and integrated. Own: `test/extension-host.js`, a small repeatable test launcher only if needed, related package scripts/check catalogue entries and `docs/development/agentviz-next-evidence.md`.
+9. **S09: Make Windows acceptance repeatable.** Owner: validation worker, with exclusive use of the GUI lane. Depends on: S08 and P01 accepted and integrated. Own: `test/extension-host.js`, a small repeatable test launcher only if needed, related package scripts/check catalogue entries and `docs/development/agentviz-next-evidence.md`.
     - Run a fresh VS Code development host using an isolated profile and synthetic source directories. Check open/reuse/close/reopen, workspace selection, name and full ID filtering, renamed sessions, a selected child, the AgentBoard entry command, no matches and source failures.
     - Inspect the emitted UI in a real browser at desktop and narrow widths. Check keyboard focus, accessible names, contrast, example/real distinction and absence of console/CSP errors. Use synthetic titles in screenshots.
     - If a reusable host runner is added, make it locate and verify the executable, fail on a missing or failed result, avoid the normal editor profile, and stop only the process it started. Add its check to `workflows/checks.json` only after the command actually works.
@@ -98,11 +127,16 @@ Defer Linux/VSCodium verification, remote machines, replay/scrubbing, game world
     - Update current behavior, source coverage, launch instructions, evidence locations and remaining limitations. Record child/review card IDs, delivered commits and the final integration commit in the execution record.
     - Accept when prior outcomes are accepted and this release is ready for native review, required checks have completed, a local VSIX exists, and the handoff clearly distinguishes implemented, verified and deferred work. Leave publication, normal profile installation, remote push and cross project caller changes unexecuted.
 
+11. **P01: Prepare an isolated Windows host harness.** Owner: harness worker. Depends on: none. Own: `test/run-extension-host.cjs`, `test/run-extension-host.test.js` and `docs/development/agentviz-next/host-harness.md`.
+    - Prepare a repeatable native Windows launcher for the existing host suite. Locate and verify VS Code, use an isolated user profile and synthetic source folders, and fail on missing, stale or failed receipts. Stop only the helper process it started.
+    - Add focused tests for executable discovery, receipt validation and cleanup scope. Calibrate once against the baseline host suite and record the exact source revision. This does not accept future features.
+    - Do not modify production files, package.json, workflows/checks.json, the shared ledger or the final host test. The later S09 task reuses this runner and accepts the integrated feature set. Run unit and syntax and return the commit, baseline result and dedicated receipt.
+
 ## Run a Plan
 
-Open AgentBoard in this workspace, choose **Run a Plan**, select **AgentViz: find and follow sessions**, inspect the preview and choose Run. The file is `workflows/agentviz-next.plan.json`. It declares ten steps, explicit sequential dependencies, named checks and `review: model`. Account, model, effort and permission values use the board's current defaults and preview; no obsolete provider alias is pinned here.
+Open AgentBoard in this workspace, choose **Run a Plan**, select **AgentViz: parallel find and follow sessions**, inspect the preview and choose Run. The file is `workflows/agentviz-next.parallel.plan.json`. It declares eleven tasks, three independent starting tasks, explicit join dependencies, named checks and `review: model`. Account, model, effort and permission values use the board's current defaults and preview; no obsolete provider alias is pinned here.
 
-Run approval and scheduling come from this native plan flow. Do not create a separate root orchestrator, call `board.js plan`, allocate extra cards, or use the former caps/policy proposal. Plan runs refuse manual add/adopt/plan operations. The plan schema has no caps or policy fields; this file does not pretend to apply custom limits. The declared ten steps and existing board limits bound the work.
+Run approval and scheduling come from this native plan flow. Do not create a separate root orchestrator, call `board.js plan`, allocate extra cards, or use the former caps/policy proposal. Plan runs refuse manual add/adopt/plan operations. The plan schema has no caps or policy fields; this file does not pretend to apply custom limits. The declared eleven tasks and existing board limits bound the work.
 
 ## Acceptance and integration
 
@@ -112,8 +146,10 @@ A passed existing suite is not proof of a new feature. Require behavior specific
 
 ## Continuity and recovery
 
-Maintain `docs/development/agentviz-next-run.md` with actual native step/card identity, source and delivery commits, commands/results, review state, evidence locations, blockers and next action. Update only your own outcome during implementation; the final handoff reconciles all prior outcomes. Real board state and Git history remain authoritative. Do not claim an allocation, interrupted command, pending check or unreadable artifact is a delivered result.
+Write each task's actual card identity, commits, commands/results, review state, blockers and next action only in its dedicated receipt under `docs/development/agentviz-next/`. Only the final handoff consolidates those receipts into `docs/development/agentviz-next-parallel-run.md`. Real board state and Git history remain authoritative. Do not claim an allocation, interrupted command, pending check or unreadable artifact is a delivered result.
 
 On resume, inspect Git status/log, this brief, the native plan card and your existing step state before editing. Reuse the interrupted step through AgentBoard's own controls and preserve a user paused run. Do not duplicate the workflow or create an independent coordinator. Follow the native generated worker prompt when blocked: report the concrete blocker and preserved evidence rather than silently reducing acceptance.
+
+The preexisting run a40b39 already allocated the original serial graph, with S01 card 8a7300 started. Editing a saved file does not change that queue. The parallel revision has a distinct filename so completion of the old run cannot archive it. Do not launch duplicate work while the old run is active; transitioning that run requires the app's supported controls and preservation of its completed/inflight work.
 
 The run ends with reviewed local changes and a local package. Leave Finish, remote push, normal profile installation, publication and cross project caller changes to separately authorized app controls. This preparation does not launch the workflow.
