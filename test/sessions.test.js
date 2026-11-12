@@ -304,3 +304,187 @@ test('discovery leaves provider folders byte-for-byte untouched and creates no f
   assert.equal(result.sessions.length, 2);
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE_/);
 });
+
+// S03: discovery answers a query over the whole source. Fixtures are synthetic.
+const { workspaceIdentity } = require('../src/transcript');
+const keyOf = cwd => workspaceIdentity(cwd).key;
+async function transcript(dir, id, cwd, seconds, extra = '') {
+  const file = path.join(dir, `${id}.jsonl`);
+  await fs.writeFile(file, prompt(cwd) + extra);
+  await fs.utimes(file, seconds, seconds);
+  return file;
+}
+const BUSY = 'C:\\work\\Busy';
+const QUIET = 'D:\\archive\\Quiet';
+const TWIN = 'E:\\elsewhere\\Quiet';
+const OLD_ID = '0a0a0a0a-1111-4222-8333-44445555aaaa';
+const OLD_CODEX = '019a0000-aaaa-7bbb-8ccc-00000000c0de';
+// 85 recent sessions in one project, then five older ones in two directories that share a basename.
+async function crowded(t) {
+  const made = await roots(t);
+  for (let index = 0; index < 85; index++) await transcript(made.claudeDir, `busy-${String(index).padStart(3, '0')}`, BUSY, 5000 + index, aiTitle(`Busy work ${index}`));
+  await transcript(made.claudeDir, OLD_ID, QUIET, 300, customTitle('Old launch plan') + record('one'));
+  await transcript(made.claudeDir, 'quiet-two', QUIET, 200);
+  await transcript(made.claudeDir, 'quiet-three', QUIET, 100, aiTitle('Something else'));
+  await transcript(made.claudeDir, 'twin-one', TWIN, 60, customTitle('Twin directory'));
+  await fs.writeFile(rollout(made.codexDir, OLD_CODEX), codexMeta(QUIET, OLD_CODEX));
+  await fs.utimes(rollout(made.codexDir, OLD_CODEX), 50, 50);
+  await fs.writeFile(made.index, line({ id: OLD_CODEX, thread_name: 'Old launch notes', updated_at: '2026-11-11T18:00:00Z' }));
+  return made;
+}
+
+// SPEC: S03, project groups and filters are applied before the response cap.
+test('a project older than 80 newer sessions is listed and its sessions are returned before the cap', async (t) => {
+  const { claudeRoot, codexRoot } = await crowded(t);
+  const everything = await discoverSessions({ claudeRoot, codexRoot });
+  assert.deepEqual([everything.sessions.length, everything.matched, everything.total, everything.limit], [80, 90, 90, 80]);
+  assert.ok(everything.sessions.every(session => session.workspaceKey === keyOf(BUSY)), 'the recent list alone holds no older project');
+  assert.match(everything.warnings.join(' '), /Showing the 80 most recently written sessions of 90\./);
+  // The groups cover all 90 sessions, including two directories with the same basename under distinct labels.
+  const groups = Object.fromEntries(everything.workspaces.map(group => [group.key, group]));
+  assert.deepEqual([groups[keyOf(BUSY)].count, groups[keyOf(QUIET)].count, groups[keyOf(TWIN)].count, everything.workspaces.length], [85, 4, 1, 3]);
+  assert.equal(groups[keyOf(BUSY)].label, 'Busy');
+  assert.notEqual(groups[keyOf(QUIET)].label.toLowerCase(), groups[keyOf(TWIN)].label.toLowerCase());
+  for (const group of everything.workspaces) assert.doesNotMatch(group.label, /^[a-z]:|\\/i);
+
+  const quiet = await discoverSessions({ claudeRoot, codexRoot }, { query: { workspaceKey: keyOf(QUIET) } });
+  assert.deepEqual(quiet.sessions.map(session => session.sessionId), [OLD_ID, 'quiet-two', 'quiet-three', OLD_CODEX]);
+  assert.deepEqual([quiet.matched, quiet.total], [4, 90]);
+  assert.deepEqual(quiet.sessions.map(session => [session.name, session.nameSource]), [['Old launch plan', 'custom'], ['Unnamed session', 'none'], ['Something else', 'generated'], ['Old launch notes', 'index']]);
+  assert.ok(quiet.sessions.every(session => session.workspaceLabel === groups[keyOf(QUIET)].label));
+  assert.deepEqual(quiet.workspaces, everything.workspaces, 'the project list does not depend on the filters');
+  assert.deepEqual(quiet.warnings, []);
+
+  // A cap smaller than the matches cuts the matches, never the unfiltered recent list.
+  const capped = await discoverSessions({ claudeRoot, codexRoot }, { limit: 2, query: { workspaceKey: keyOf(QUIET) } });
+  assert.deepEqual([capped.sessions.map(session => session.sessionId), capped.matched], [[OLD_ID, 'quiet-two'], 4]);
+  assert.match(capped.warnings.join(' '), /Showing the 2 most recently written sessions of 4 that match\./);
+  const twin = await discoverSessions({ claudeRoot, codexRoot }, { query: { workspaceKey: keyOf(TWIN) } });
+  assert.deepEqual(twin.sessions.map(session => session.sessionId), ['twin-one']);
+  assert.doesNotMatch(JSON.stringify([everything.sessions.map(publicFields), everything.workspaces, quiet.sessions.map(publicFields)]), /PRIVATE_|[a-z]:\\\\|[a-z]:\//i, 'no drive or root reaches a label or a public field');
+});
+
+// SPEC: S03, a full ID or a saved name outside the recent list is found; filters intersect; no matches is explicit.
+test('full IDs, partial IDs and names outside the recent list are found, and filters intersect', async (t) => {
+  const { claudeRoot, codexRoot } = await crowded(t);
+  const find = async query => { const result = await discoverSessions({ claudeRoot, codexRoot }, { query }); return [result.sessions.map(session => session.sessionId), result.matched, result.total]; };
+  assert.deepEqual(await find({ id: `  ${OLD_ID.toUpperCase()} ` }), [[OLD_ID], 1, 90]);
+  assert.deepEqual(await find({ id: '8333-44445555AAAA' }), [[OLD_ID], 1, 90], 'a fragment past the first eight characters');
+  assert.deepEqual(await find({ id: OLD_CODEX }), [[OLD_CODEX], 1, 90]);
+  assert.deepEqual(await find({ name: ' OLD LAUNCH ' }), [[OLD_ID, OLD_CODEX], 2, 90], 'saved names of both providers, read before the cap');
+  assert.deepEqual(await find({ name: 'old launch', workspaceKey: keyOf(QUIET), id: 'c0de' }), [[OLD_CODEX], 1, 90]);
+  assert.deepEqual(await find({ name: 'old launch', workspaceKey: keyOf(BUSY) }), [[], 0, 90]);
+  assert.deepEqual(await find({ name: 'busy work' }), [Array.from({ length: 80 }, (_, index) => `busy-${String(84 - index).padStart(3, '0')}`), 85, 90]);
+
+  const none = await discoverSessions({ claudeRoot, codexRoot }, { query: { name: 'no session is called this' } });
+  assert.deepEqual([none.sessions, none.matched, none.total, none.pending], [[], 0, 90, { workspaces: 0, names: 0 }]);
+  assert.equal(none.workspaces.length, 3, 'no matches still reports every project');
+  assert.deepEqual(none.warnings, []);
+  const absent = await discoverSessions({ claudeRoot, codexRoot }, { query: { workspaceKey: `ws:${'0'.repeat(20)}` } });
+  assert.deepEqual([absent.sessions, absent.matched], [[], 0]);
+});
+
+// SPEC: S03, a followed session keeps its identity through a rename and disappears cleanly when deleted.
+test('a rename moves a session between name matches without changing its ID, and a deletion removes it', async (t) => {
+  const { claudeRoot, codexRoot, claudeDir } = await crowded(t);
+  const file = path.join(claudeDir, `${OLD_ID}.jsonl`);
+  const look = (query, keep = []) => discoverSessions({ claudeRoot, codexRoot }, { query, keep });
+  const before = (await look({ name: 'old launch plan' })).sessions[0];
+  // The followed session is reported in `kept` whatever the filters say, and is not padded into the answer.
+  let result = await look({ name: 'busy' }, [before.id]);
+  assert.deepEqual([result.kept.map(session => [session.id, session.name]), result.sessions.some(session => session.id === before.id)], [[[before.id, 'Old launch plan']], false]);
+
+  await fs.appendFile(file, customTitle('Shipped at last'));
+  await fs.utimes(file, 301, 301);
+  assert.equal((await look({ name: 'old launch plan' })).matched, 0);
+  const after = (await look({ name: 'shipped' })).sessions[0];
+  assert.deepEqual([after.id, after.sessionId, after.workspaceKey, after.name], [before.id, before.sessionId, before.workspaceKey, 'Shipped at last']);
+  assert.equal((await look({ name: 'busy' }, [before.id])).kept[0].name, 'Shipped at last');
+
+  await fs.unlink(file);
+  result = await look({ workspaceKey: keyOf(QUIET) }, [before.id]);
+  assert.deepEqual([result.kept, result.total, result.matched], [[], 89, 3]);
+  assert.ok(!result.all.some(session => session.id === before.id));
+  assert.equal(result.workspaces.find(group => group.key === keyOf(QUIET)).count, 3);
+  await fs.unlink(path.join(claudeDir, 'twin-one.jsonl'));
+  assert.deepEqual((await look({})).workspaces.map(group => group.key).sort(), [keyOf(BUSY), keyOf(QUIET)].sort(), 'an emptied project leaves the list');
+});
+
+// SPEC: S03, metadata is remembered where reads were measured to repeat; transcripts are not reread per refresh.
+test('an unchanged transcript is not opened again, and names are read once and only when needed', async (t) => {
+  const { claudeRoot, codexRoot, claudeDir } = await roots(t);
+  const files = [];
+  for (let index = 0; index < 30; index++) files.push(await transcript(claudeDir, `cost-${String(index).padStart(2, '0')}`, BUSY, 1000 + index, longRecord('filler') + customTitle(`Costly ${index}`)));
+  const run = options => discoverSessions({ claudeRoot, codexRoot }, { limit: 5, ...options });
+  const first = await run({});
+  // 30 project reads, plus saved names for the five returned sessions only.
+  assert.deepEqual([first.cost.files, first.cost.opened, first.cost.walked], [30, 35, true]);
+  assert.deepEqual(first.sessions.map(session => session.name), [29, 28, 27, 26, 25].map(index => `Costly ${index}`));
+  const repeat = await run({});
+  assert.deepEqual([repeat.cost.opened, repeat.cost.bytesRead], [0, 0], 'an ordinary refresh opens no unchanged transcript');
+  assert.deepEqual(repeat.sessions.map(publicFields), first.sessions.map(publicFields));
+
+  // New activity on one returned session: only that transcript is opened, and only the new bytes are read.
+  const appended = record('new-activity') + customTitle('Costly renamed');
+  await fs.appendFile(files[29], appended);
+  const grown = await run({});
+  assert.deepEqual([grown.cost.opened, grown.cost.bytesRead, grown.sessions[0].name], [1, Buffer.byteLength(appended), 'Costly renamed']);
+
+  // A name search reads the remaining 25 transcripts once; asking again reads nothing.
+  const search = await run({ query: { name: 'costly 1' } });
+  assert.deepEqual([search.cost.opened, search.matched, search.pending.names], [25, 11, 0]);
+  const again = await run({ query: { name: 'costly 1' } });
+  assert.deepEqual([again.cost.opened, again.cost.bytesRead, again.matched], [0, 0, 11]);
+
+  // A reused listing answers a new query without walking; a file created since then appears only after a fresh walk.
+  await transcript(claudeDir, 'cost-late', BUSY, 9000);
+  const reused = await run({ query: { id: 'cost-' }, walk: again.walk });
+  assert.deepEqual([reused.cost.walked, reused.total, reused.cost.opened], [false, 30, 0]);
+  assert.equal((await run({ query: { id: 'cost-' } })).total, 31);
+
+  // A listing that is older than the followed transcript's latest bytes must not cause a full reread.
+  const stale = (await run({})).walk;
+  const more = customTitle('Followed and growing');
+  await fs.appendFile(files[0], more);
+  const keep = [first.all.find(session => session.sessionId === 'cost-00').id];
+  const followed = await run({ keep });
+  assert.deepEqual([followed.kept[0].name, followed.cost.bytesRead], ['Followed and growing', Buffer.byteLength(more)]);
+  const behind = await run({ keep, walk: stale });
+  assert.deepEqual([behind.kept[0].name, behind.cost.bytesRead], ['Followed and growing', 0]);
+});
+
+// SPEC: S03, an incomplete lookup is reported, continues on later calls and never restarts.
+test('unread projects and names are counted as pending and are completed over later calls', async (t) => {
+  const { claudeRoot, codexRoot, claudeDir } = await roots(t);
+  let bytes = 0;
+  for (let index = 0; index < 10; index++) bytes += (await fs.stat(await transcript(claudeDir, `slow-${index}`, index % 2 ? BUSY : QUIET, 1000 + index, longRecord('filler').repeat(3) + customTitle(`Needle ${index}`)))).size;
+  const pass = options => discoverSessions({ claudeRoot, codexRoot }, { limit: 2, headBudget: 3, ...options });
+  const seen = [];
+  let result;
+  do {
+    result = await pass({});
+    seen.push([result.pending.workspaces, result.workspaces.reduce((sum, group) => sum + group.count, 0)]);
+    if (result.pending.workspaces) assert.match(result.warnings.join(' '), new RegExp(`Projects are still being read for ${result.pending.workspaces} sessions`));
+  } while (result.pending.workspaces && seen.length < 10);
+  assert.deepEqual(seen, [[7, 3], [4, 6], [1, 9], [0, 10]]);
+  assert.deepEqual(result.workspaces.map(group => group.count), [5, 5]);
+  assert.equal(result.total, 10, 'the total never hides the unread sessions');
+
+  // Names: a small read allowance per call. Matches grow, the pending count falls, and no byte is read twice.
+  const matched = [];
+  const passes = [];
+  let read = 0;
+  do {
+    result = await pass({ query: { name: 'needle' }, titleBudget: 100 * 1024 });
+    matched.push(result.matched);
+    read += result.cost.bytesRead;
+    assert.equal(result.matched + result.pending.names, 10);
+    passes.push(result.cost.opened);
+    if (result.pending.names) assert.match(result.warnings.join(' '), /Saved names are still being read in \d+ sessions/);
+  } while (result.pending.names && matched.length < 20);
+  assert.equal(matched.at(-1), 10);
+  assert.ok(matched.length > 2 && matched.every((count, index) => index === 0 || count >= matched[index - 1]), String(matched));
+  assert.ok(passes.every(opened => opened <= 4), `a call whose allowance is spent opens nothing more: ${passes}`);
+  assert.ok(read <= bytes, `${read} bytes read for names in ${bytes} bytes of transcripts`);
+  assert.deepEqual(result.warnings, ['Showing the 2 most recently written sessions of 10 that match.']);
+});

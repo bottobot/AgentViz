@@ -14,7 +14,7 @@ const appSource = fs.readFileSync(path.join(__dirname, '..', 'media', 'app.js'),
 const markup = webviewHtml({ css: 'style.css', view: 'view.js', app: 'app.js', cspSource: 'test:' });
 const body = markup.slice(markup.indexOf('<body>'));
 
-function boot({ host = true, saved, clipboard = 'ok' } = {}) {
+function boot({ host = true, saved, clipboard = 'ok', answer = true } = {}) {
   const document = { activeElement: null, selected: null };
   class Element {
     constructor(tag, id = '') { Object.assign(this, { tagName: tag, id, children: [], listeners: {}, attributes: {}, stored: '', text: '', disabled: false, hidden: false, innerHTML: '', valueWrites: 0, rebuilds: 0 }); }
@@ -60,15 +60,29 @@ function boot({ host = true, saved, clipboard = 'ok' } = {}) {
     navigator: clipboard === 'ok' ? { clipboard: { writeText: async value => { copied.push(value); } } } : {}
   };
   document.createRange = () => ({ selectNodeContents(node) { this.node = node; } });
-  if (host) sandbox.acquireVsCodeApi = () => ({ postMessage: message => posted.push(structuredClone(message)), getState: () => saved, setState: value => states.push(structuredClone(value)) });
-  vm.runInNewContext(appSource, sandbox, { filename: 'media/app.js' });
-  const deliver = (sessions, selectedId, extra = {}) => {
-    const selected = sessions.find(session => session.id === selectedId);
-    windowListeners.message({ data: { type: 'state', sessions, selectedId, snapshot: selected ? snapshot(selected) : null, warnings: [], ...extra } });
+  // A stand-in host (S03): it holds the whole catalogue, filters it for the newest request and answers with that
+  // request's number, the project groups of the whole catalogue and the followed session on its own.
+  let full = null;
+  let followed = '';
+  let asked = { seq: 1 };
+  const respond = (extra = {}) => {
+    const found = view.filterSessions(full, asked);
+    const selected = full.find(session => session.id === followed) || null;
+    windowListeners.message({ data: { type: 'state', sessions: found, selectedId: followed, selected, snapshot: selected ? snapshot(selected) : null, warnings: [],
+      workspaces: view.workspaceChoices(full), lookup: { seq: asked.seq, total: full.length, matched: found.length, limit: 80, pendingNames: 0, pendingWorkspaces: 0 }, ...extra } });
   };
+  if (host) sandbox.acquireVsCodeApi = () => ({ postMessage: message => {
+    posted.push(structuredClone(message));
+    if (message.type === 'ready' && message.query) asked = message.query;
+    if (message.type === 'select') followed = message.id;
+    if (message.type === 'query') { asked = message; if (answer && full) respond(); }
+  }, getState: () => saved, setState: value => states.push(structuredClone(value)) });
+  vm.runInNewContext(appSource, sandbox, { filename: 'media/app.js' });
+  const deliver = (sessions, selectedId, extra = {}) => { full = sessions; followed = selectedId; respond(extra); };
+  const raw = data => windowListeners.message({ data });
   const type = (id, text) => { elements[id].focus(); elements[id].stored = text; elements[id].fire('input'); };
   const options = id => elements[id].children.map(option => ({ value: option.value, text: option.textContent }));
-  return { elements, document, posted, states, copied, deliver, type, options };
+  return { elements, document, posted, states, copied, deliver, raw, type, options };
 }
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
@@ -342,4 +356,114 @@ test('the stylesheet stacks the filters and wraps the full ID on a narrow viewpo
   assert.match(css, /\.selection-id\s*\{[^}]*overflow-wrap:\s*anywhere/);
   assert.match(css, /\[hidden\]\s*\{[^}]*display:\s*none/);
   assert.match(css, /input:focus-visible/);
+});
+
+// S03: the view asks the host, and shows how much of the source an answer covers.
+const group = (key, label, count) => ({ key, label, count });
+const answerFor = (page, seq, sessions, extra = {}) => page.raw({ type: 'state', sessions, selectedId: '', selected: null, snapshot: null, warnings: [],
+  workspaces: [], lookup: { seq, total: sessions.length, matched: sessions.length, limit: 80, pendingNames: 0, pendingWorkspaces: 0 }, ...extra });
+
+test('every filter change asks the host with a numbered, trimmed request, and the saved filters go with ready', () => {
+  const page = boot({ saved: { workspaceKey: WS_STORE, workspaceLabel: 'storefront', name: 'login', id: '4b02' } });
+  assert.deepEqual(page.posted, [{ type: 'ready', query: { seq: 1, workspaceKey: WS_STORE, name: 'login', id: '4b02' } }]);
+  page.deliver(catalogue(), 'claude:a1');
+  page.type('name-filter', '  Fix LOGIN ');
+  page.type('id-filter', ' 3F2A9C1E-7B64-4D10-9A55-0C1E2D3F4B02 ');
+  page.elements['clear-filters'].fire('click');
+  assert.deepEqual(page.posted.slice(1), [
+    { type: 'query', seq: 2, workspaceKey: WS_STORE, name: 'Fix LOGIN', id: '4b02' },
+    { type: 'query', seq: 3, workspaceKey: WS_STORE, name: 'Fix LOGIN', id: '3F2A9C1E-7B64-4D10-9A55-0C1E2D3F4B02' },
+    { type: 'query', seq: 4, workspaceKey: '', name: '', id: '' }
+  ]);
+});
+
+test('an answer to older filters is dropped, and the wait for the current answer is visible', () => {
+  const page = boot({ answer: false });
+  const sessions = catalogue();
+  assert.match(page.options('session')[0].text, /Looking up sessions/);
+  assert.match(page.elements.matches.textContent, /Looking up sessions/);
+  page.deliver(sessions, 'claude:a1');
+  assert.match(page.elements.matches.textContent, /^6 sessions found\.$/);
+
+  page.type('name-filter', 'zzz');
+  assert.deepEqual(page.options('session').map(option => option.value), ['']);
+  assert.match(page.options('session')[0].text, /Looking up sessions/, 'not "No sessions match" before the host has answered');
+  assert.match(page.elements.matches.textContent, /Looking up sessions/);
+  assert.doesNotMatch(page.elements.matches.textContent, /No sessions match/);
+  page.type('name-filter', 'filters');
+
+  // The answer to the second request (seq 2, "zzz") arrives after the third was sent: it must not be shown.
+  answerFor(page, 2, [], { selectedId: 'claude:a1', selected: sessions[0] });
+  assert.match(page.elements.matches.textContent, /Looking up sessions/);
+  assert.deepEqual(page.options('session').map(option => option.value), ['', 'claude:c1'], 'still the old list narrowed locally');
+  // An even older answer for the unfiltered list must not bring every session back under the new filter.
+  answerFor(page, 1, sessions, { selectedId: 'claude:a1', selected: sessions[0] });
+  assert.match(page.elements.matches.textContent, /Looking up sessions/);
+
+  // The current answer brings a session the old list never held.
+  const older = { ...sessions[2], id: 'claude:old', sessionId: '00000000-9999-4999-8999-999999999999', name: 'Older filters work' };
+  answerFor(page, 3, [sessions[2], older], { selectedId: 'claude:a1', selected: sessions[0], lookup: { seq: 3, total: 400, matched: 2, limit: 80, pendingNames: 0, pendingWorkspaces: 0 } });
+  assert.deepEqual(page.options('session').map(option => option.value), ['', 'claude:c1', 'claude:old']);
+  assert.match(page.elements.matches.textContent, /^2 of 400 sessions match\.$/);
+  assert.equal(page.elements['selected-id'].textContent, sessions[0].sessionId, 'the followed session is unchanged throughout');
+  assert.equal(page.elements['name-filter'].valueWrites, 0);
+});
+
+test('project choices come from the host groups, not from the returned sessions', () => {
+  const page = boot({ answer: false });
+  const sessions = catalogue();
+  const old = `ws:${'d'.repeat(20)}`;
+  const twin = `ws:${'e'.repeat(20)}`;
+  answerFor(page, 1, sessions.slice(0, 2), { selectedId: 'claude:a1', selected: sessions[0],
+    workspaces: [group(WS_STORE, 'storefront', 2), group(old, 'archive', 3), group(twin, 'Archive', 1), group('ws:unknown', 'Unknown workspace', 4)],
+    lookup: { seq: 1, total: 10, matched: 10, limit: 2, pendingNames: 0, pendingWorkspaces: 0 } });
+  const options = page.options('workspace');
+  assert.equal(options[0].text, 'All projects (10)');
+  // Two directories with the same label stay apart by key fragment, and a project with no returned session is listed.
+  assert.deepEqual(options.slice(1).map(option => option.text).sort(), ['Archive · eeeeee (1)', 'Unknown workspace (4)', 'archive · dddddd (3)', 'storefront (2)'].sort());
+  assert.deepEqual(options.slice(1).map(option => option.value).sort(), [old, twin, WS_STORE, 'ws:unknown'].sort());
+  assert.match(page.elements.matches.textContent, /10 sessions found\. Showing the 2 most recently written\. Choose a project or narrow the search to reach older ones\./);
+
+  page.elements.workspace.stored = old;
+  page.elements.workspace.fire('change');
+  assert.deepEqual(page.posted.at(-1), { type: 'query', seq: 2, workspaceKey: old, name: '', id: '' });
+  assert.equal(page.states.at(-1).workspaceLabel, 'archive · dddddd');
+});
+
+test('the followed session stays named when the answer leaves it out, and limits and unread names are stated', () => {
+  const page = boot({ answer: false });
+  const sessions = catalogue();
+  const followed = { ...sessions[4], id: 'claude:deep', sessionId: 'deadbeef-0000-4000-8000-00000000d00d', name: 'Followed from long ago' };
+  // The returned list is the newest two of many; the followed session is older than all of them.
+  answerFor(page, 1, sessions.slice(0, 2), { selectedId: 'claude:deep', selected: followed, snapshot: snapshot(followed),
+    lookup: { seq: 1, total: 500, matched: 500, limit: 2, pendingNames: 0, pendingWorkspaces: 7 } });
+  assert.equal(page.elements['selected-name'].textContent, 'Followed from long ago');
+  assert.equal(page.elements['selected-id'].textContent, 'deadbeef-0000-4000-8000-00000000d00d');
+  assert.equal(page.elements.session.value, 'claude:deep', 'the picker shows the followed session itself, not the first returned one');
+  assert.match(page.elements.content.innerHTML, /deadbeef-0000-4000-8000-00000000d00d/);
+  assert.match(page.elements.matches.textContent, /500 sessions found\. Showing the 2 most recently written\./);
+  assert.match(page.elements.matches.textContent, /Still reading projects for 7 sessions\./);
+
+  // A rename arrives in a later answer: same ID, new name, still followed.
+  answerFor(page, 1, sessions.slice(0, 2), { selectedId: 'claude:deep', selected: { ...followed, name: 'Renamed while followed' }, snapshot: snapshot(followed),
+    lookup: { seq: 1, total: 500, matched: 500, limit: 2, pendingNames: 0, pendingWorkspaces: 0 } });
+  assert.equal(page.elements['selected-name'].textContent, 'Renamed while followed');
+  assert.equal(page.elements.session.value, 'claude:deep');
+  assert.deepEqual(page.posted.filter(message => message.type === 'select'), []);
+
+  // A name search that is still reading transcripts says so instead of claiming there are no matches.
+  page.type('name-filter', 'needle');
+  answerFor(page, 2, [], { selectedId: 'claude:deep', selected: followed, lookup: { seq: 2, total: 500, matched: 0, limit: 80, pendingNames: 41, pendingWorkspaces: 0 } });
+  assert.match(page.options('session')[0].text, /No matches yet\. Still reading sessions/);
+  assert.match(page.elements.matches.textContent, /No sessions match yet\. .*Still reading saved names in 41 sessions; more matches may appear\./);
+  assert.equal(page.elements['selected-name'].textContent, 'Followed from long ago');
+  assert.match(page.elements['selection-note'].textContent, /hidden by the current filters/i);
+
+  // The followed transcript was deleted: it stays named and is reported as gone; nothing else takes its place.
+  const gone = 'The followed session is no longer in the source folders (deleted or moved). Choose another session.';
+  answerFor(page, 2, [], { selectedId: 'claude:deep', selected: followed, warnings: [gone], lookup: { seq: 2, total: 499, matched: 0, limit: 80, pendingNames: 0, pendingWorkspaces: 0, missing: true } });
+  assert.equal(page.elements['selected-id'].textContent, 'deadbeef-0000-4000-8000-00000000d00d');
+  assert.match(page.elements['selection-note'].textContent, /No longer in the source folders/);
+  assert.equal(page.elements.connection.textContent, gone);
+  assert.deepEqual(page.posted.filter(message => message.type === 'select'), []);
 });

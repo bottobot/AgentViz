@@ -15,7 +15,9 @@ const HEAD_PREVIEW = 64 * 1024;
 const TITLE_LINE = 64 * 1024;
 const TITLE_SCAN_BUDGET = 256 * 1024 * 1024;
 const INDEX_LIMIT = 8 * 1024 * 1024;
-const METADATA_CACHE_LIMIT = 2000;
+const METADATA_CACHE_LIMIT = 20000;
+// WARNING: disclosed lookup limit; at most this many transcripts are opened for their project per discovery call.
+const HEAD_PASS = 1500;
 const TITLE_MARKER = Buffer.from('-title"');
 const UNKNOWN_WORKSPACE_KEY = 'ws:unknown';
 const UNKNOWN_WORKSPACE_LABEL = 'Unknown workspace';
@@ -91,7 +93,8 @@ class TranscriptReader {
   }
 }
 
-async function discoverSessions({ claudeRoot, codexRoot }, limit = SESSION_LIMIT) {
+// Lists every transcript file with its stat. Nothing is opened here.
+async function walkSources({ claudeRoot, codexRoot }) {
   const files = [];
   const warnings = [];
   async function walk(folder, provider, root = false) {
@@ -108,7 +111,7 @@ async function discoverSessions({ claudeRoot, codexRoot }, limit = SESSION_LIMIT
         try {
           const stat = await fs.stat(file);
           const id = provider === 'codex' ? entry.name.match(/([0-9a-f-]{36})\.jsonl$/i)?.[1] || entry.name.slice(8, -6) : entry.name.replace(/^agent-/, '').slice(0, -6);
-          files.push({ id: `${provider}:${createHash('sha256').update(file).digest('hex').slice(0, 20)}`, sessionId: id, file, provider, modified: stat.mtimeMs, project: '', child: path.basename(folder) === 'subagents' });
+          files.push({ id: `${provider}:${createHash('sha256').update(file).digest('hex').slice(0, 20)}`, sessionId: id, file, provider, modified: stat.mtimeMs, size: stat.size, identity: `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`, project: '', child: path.basename(folder) === 'subagents' });
         } catch (error) {
           if (error.code !== 'ENOENT') warnings.push(`${provider} transcript metadata could not be read (${error.code || 'unknown'}).`);
         }
@@ -118,39 +121,109 @@ async function discoverSessions({ claudeRoot, codexRoot }, limit = SESSION_LIMIT
   await walk(path.join(claudeRoot, 'projects'), 'claude', true);
   await walk(path.join(codexRoot, 'sessions'), 'codex', true);
   files.sort((a, b) => b.modified - a.modified || a.id.localeCompare(b.id));
-  const sessions = files.slice(0, limit);
-  if (files.length > limit) warnings.push(`Showing the ${limit} most recently written sessions of ${files.length}.`);
-  const threadNames = sessions.some(session => session.provider === 'codex') ? await readCodexIndex(codexRoot, warnings) : new Map();
-  const budget = { remaining: TITLE_SCAN_BUDGET };
-  const identities = new Map();
-  let pending = false;
-  for (const session of sessions) {
-    let entry;
-    try { entry = await readMetadata(session, budget); }
-    catch (error) {
+  return { files, warnings };
+}
+
+const needle = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
+
+// The host query contract (S03). `options` is a number (the response cap) or
+// { limit, query: { workspaceKey, name, id }, keep: [catalogue ids], walk, headBudget, titleBudget }.
+// Order of work: list every transcript, group all of them by project, filter by project and ID, then by name,
+// and only then cut the matches to `limit`. `workspaces`, `total` and `matched` are never cut.
+// `keep` names sessions (the followed one) whose current metadata is returned in `kept` whatever the filters say.
+// `walk` is a previous result's `walk`; passing it back answers a new query without listing the folders again.
+// `pending` counts sessions whose project or saved name has not been read yet; they are read on later calls.
+async function discoverSessions(roots, options = {}) {
+  const settings = typeof options === 'number' ? { limit: options } : options || {};
+  const limit = Number.isInteger(settings.limit) && settings.limit >= 0 ? settings.limit : SESSION_LIMIT;
+  const query = { workspaceKey: typeof settings.query?.workspaceKey === 'string' ? settings.query.workspaceKey : '', name: needle(settings.query?.name), id: needle(settings.query?.id) };
+  const keep = new Set(Array.isArray(settings.keep) ? settings.keep : []);
+  const walked = settings.walk || await walkSources(roots);
+  const files = walked.files;
+  const warnings = [...walked.warnings];
+  const cost = { files: files.length, walked: !settings.walk, opened: 0, bytesRead: 0 };
+  const budget = { heads: settings.headBudget ?? HEAD_PASS, remaining: settings.titleBudget ?? TITLE_SCAN_BUDGET, cost };
+  const pending = { workspaces: 0, names: 0 };
+  const entries = new Map();
+  const unreadable = new Set();
+  async function metadata(session, titles) {
+    if (unreadable.has(session)) return null;
+    try {
+      const entry = await readMetadata(session, budget, titles);
+      if (entry) entries.set(session, entry);
+      return entry;
+    } catch (error) {
       metadataCache.delete(session.file);
+      entries.delete(session);
+      unreadable.add(session);
       if (error.code !== 'ENOENT') warnings.push(`A session label could not be read (${error.code || 'unknown'}).`);
+      return null;
     }
-    if (entry && !entry.complete) pending = true;
+  }
+
+  // 1. Project of every session: one small read per transcript, remembered until that transcript changes.
+  const kept = files.filter(session => keep.has(session.id));
+  for (const session of [...kept, ...files]) if (!entries.has(session)) await metadata(session, false);
+  const identities = new Map();
+  const counts = new Map();
+  for (const session of files) {
+    const entry = entries.get(session);
+    if (!entry && !unreadable.has(session)) { session.workspaceKey = undefined; pending.workspaces++; continue; }
     const identity = workspaceIdentity(entry?.cwd);
     session.project = identity ? projectName(entry.cwd) : '';
     session.workspaceKey = identity ? identity.key : UNKNOWN_WORKSPACE_KEY;
     if (identity && !identities.has(identity.key)) identities.set(identity.key, identity);
+    counts.set(session.workspaceKey, (counts.get(session.workspaceKey) || 0) + 1);
+  }
+  const labels = workspaceLabels(identities);
+  for (const session of files) session.workspaceLabel = labels.get(session.workspaceKey) || UNKNOWN_WORKSPACE_LABEL;
+  const workspaces = [...counts].map(([key, count]) => ({ key, label: labels.get(key) || UNKNOWN_WORKSPACE_LABEL, count }))
+    .sort((a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key));
+
+  // 2. Project and ID filters need nothing more from disk.
+  const candidates = files.filter(session => (!query.workspaceKey || session.workspaceKey === query.workspaceKey) && (!query.id || session.sessionId.toLowerCase().includes(query.id)));
+  const threadNames = [...candidates, ...kept].some(session => session.provider === 'codex') ? await readCodexIndex(roots.codexRoot, warnings, cost) : new Map();
+  const named = new Set();
+  async function name(session) {
+    if (named.has(session)) return;
+    named.add(session);
+    const entry = await metadata(session, true);
     const indexed = session.provider === 'codex' ? threadNames.get(session.sessionId.toLowerCase()) : '';
     session.nameSource = entry?.custom ? 'custom' : entry?.generated ? 'generated' : indexed ? 'index' : 'none';
     session.name = entry?.custom || entry?.generated || indexed || UNNAMED_SESSION;
+    session.nameComplete = Boolean(entry?.complete);
   }
-  const labels = workspaceLabels(identities);
-  for (const session of sessions) session.workspaceLabel = labels.get(session.workspaceKey) || UNKNOWN_WORKSPACE_LABEL;
-  if (pending) warnings.push('Some session names are still being read. They are filled in over the next refreshes.');
-  const listed = new Set(sessions.map(session => session.file));
-  for (const file of metadataCache.keys()) if (!listed.has(file) && metadataCache.size > METADATA_CACHE_LIMIT) metadataCache.delete(file);
-  return { sessions, warnings: [...new Set(warnings)], total: files.length };
+  for (const session of kept) await name(session);
+
+  // 3. A name filter reads saved names for every candidate before anything is cut. Without one, only the
+  // returned sessions need their names, so older transcripts are not read at all.
+  let matches = candidates;
+  if (query.name) {
+    matches = [];
+    for (const session of candidates) {
+      await name(session);
+      if (session.name.toLowerCase().includes(query.name)) matches.push(session);
+      // Unread names can add a match or, after a rename, remove one, so they are counted either way.
+      if (!session.nameComplete && !unreadable.has(session)) pending.names++;
+    }
+  }
+  const sessions = matches.slice(0, limit);
+  for (const session of sessions) await name(session);
+
+  if (matches.length > limit) warnings.push(`Showing the ${limit} most recently written sessions of ${matches.length}${query.workspaceKey || query.name || query.id ? ' that match' : ''}.`);
+  if (pending.workspaces) warnings.push(`Projects are still being read for ${pending.workspaces} sessions. They are filled in over the next refreshes.`);
+  if (pending.names) warnings.push(`Saved names are still being read in ${pending.names} sessions. More matches may appear over the next refreshes.`);
+  else if (sessions.some(session => !session.nameComplete && !unreadable.has(session))) warnings.push('Some session names are still being read. They are filled in over the next refreshes.');
+  if (metadataCache.size > METADATA_CACHE_LIMIT) {
+    const listed = new Set(files.map(session => session.file));
+    for (const file of metadataCache.keys()) if (!listed.has(file)) metadataCache.delete(file);
+  }
+  return { sessions, kept, warnings: [...new Set(warnings)], total: files.length, matched: matches.length, limit, workspaces, pending, all: files, walk: walked, cost };
 }
 
 // Verified local shape (2026-11-12): <codexRoot>/session_index.jsonl holds appended lines {id, thread_name, updated_at}.
 // An ID can repeat after a rename; the last line written for it is used. Nothing else in the Codex folder is opened for names.
-async function readCodexIndex(codexRoot, warnings) {
+async function readCodexIndex(codexRoot, warnings, cost) {
   const names = new Map();
   let handle;
   try {
@@ -162,6 +235,7 @@ async function readCodexIndex(codexRoot, warnings) {
     const start = Math.max(0, size - INDEX_LIMIT);
     const buffer = Buffer.alloc(size - start);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
+    cost.bytesRead += bytesRead;
     const lines = buffer.subarray(0, bytesRead).toString('utf8').split('\n');
     if (start > 0) {
       lines.shift();
@@ -179,22 +253,41 @@ async function readCodexIndex(codexRoot, warnings) {
   return names;
 }
 
-// Working directory comes from the first records. Claude titles can be appended anywhere, so each transcript is
+// Working directory comes from the first records. Claude titles can be appended anywhere, so a transcript is
 // scanned once and afterwards only for newly appended bytes; a replaced or shortened file is scanned again.
-async function readMetadata(session, budget) {
+// Measured 2026-11-12 on 3,600 local transcripts: opening each one for its first records took about 2.5 s, so a
+// transcript whose size and modified time match the remembered ones is not opened at all. Titles are read only
+// when `titles` is set. Returns null when the first read is put off to a later call by the per-call budget.
+async function readMetadata(session, budget, titles) {
+  const replaced = (known, identity, size, mtime) => known.identity !== identity || size < known.size || (size === known.size && mtime !== known.mtime);
+  let entry = metadataCache.get(session.file);
+  if (entry && !replaced(entry, session.identity, session.size, session.modified)) {
+    const wantHead = !entry.headDone && entry.headSize !== session.size;
+    const wantTitles = titles && session.provider === 'claude' && entry.offset < session.size;
+    // Nothing to read, or this call's allowance for names is spent: the transcript is not opened.
+    if (!wantHead && (!wantTitles || budget.remaining <= 0)) {
+      entry.size = session.size;
+      entry.mtime = session.modified;
+      entry.complete = session.provider !== 'claude' || entry.offset >= session.size;
+      return entry;
+    }
+  } else if (!entry && !titles && budget.heads <= 0) return null;
   const handle = await fs.open(session.file, 'r');
   try {
+    budget.cost.opened++;
     const stat = await handle.stat();
     const identity = `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`;
-    let entry = metadataCache.get(session.file);
-    if (!entry || entry.identity !== identity || stat.size < entry.offset || (stat.size === entry.offset && stat.mtimeMs !== entry.mtime)) {
-      entry = { identity, offset: 0, cwd: '', headDone: false, custom: '', generated: '', carry: Buffer.alloc(0), skipping: false };
+    // Checked against the open file, not the listing: a listing reused for a new query can be a few seconds old.
+    if (!entry || replaced(entry, identity, stat.size, stat.mtimeMs)) {
+      entry = { identity, offset: 0, size: 0, headSize: -1, cwd: '', headDone: false, custom: '', generated: '', carry: Buffer.alloc(0), skipping: false };
       metadataCache.set(session.file, entry);
     }
-    if (!entry.headDone) {
+    if (!entry.headDone && entry.headSize !== stat.size) {
       // WARNING: metadata preview only; a large first record can leave a workspace unavailable.
       const head = Buffer.alloc(Math.min(HEAD_PREVIEW, stat.size));
       const { bytesRead } = await handle.read(head, 0, head.length, 0);
+      budget.heads--;
+      budget.cost.bytesRead += bytesRead;
       for (const line of head.subarray(0, bytesRead).toString('utf8').split('\n')) {
         let record;
         try { record = JSON.parse(line); } catch { continue; }
@@ -202,8 +295,9 @@ async function readMetadata(session, budget) {
         if (typeof cwd === 'string' && cwd.trim()) { entry.cwd = cwd; break; }
       }
       entry.headDone = !!entry.cwd || bytesRead >= HEAD_PREVIEW;
+      entry.headSize = stat.size;
     }
-    if (session.provider === 'claude') {
+    if (titles && session.provider === 'claude') {
       const target = Math.min(stat.size, entry.offset + Math.max(0, budget.remaining));
       const buffer = Buffer.alloc(Math.min(CHUNK, target - entry.offset));
       while (entry.offset < target) {
@@ -211,11 +305,13 @@ async function readMetadata(session, budget) {
         if (!bytesRead) break;
         entry.offset += bytesRead;
         budget.remaining -= bytesRead;
+        budget.cost.bytesRead += bytesRead;
         scanTitles(entry, buffer.subarray(0, bytesRead));
       }
-    } else entry.offset = stat.size;
+    }
+    entry.size = stat.size;
     entry.mtime = stat.mtimeMs;
-    entry.complete = entry.offset >= stat.size;
+    entry.complete = session.provider !== 'claude' || entry.offset >= stat.size;
     return entry;
   } finally { await handle.close(); }
 }
