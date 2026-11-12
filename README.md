@@ -27,6 +27,44 @@ The webview receives tool categories, safe names, file names with at most two pa
 
 The extension makes no network requests, uses no model tokens, installs no hooks, starts no server, opens no port and writes no transcript files. The view uses plain SVG and local CSS and JavaScript. There are no runtime dependencies.
 
+## Opening a session from another extension
+
+Another extension in the same VS Code window can open AgentViz on one local session with the command `agentviz.openSession`. It is not in the Command Palette. **AgentViz: Open Activity** (`agentviz.open`) is unchanged and ignores any argument.
+
+The IDs below are synthetic.
+
+```js
+const result = await vscode.commands.executeCommand('agentviz.openSession', {
+  provider: 'claude',                                  // 'claude' or 'codex'
+  sessionId: 'aaaaaaaa-1111-4222-8333-444444444444'    // the provider's full session ID
+});
+// { ok: true, provider: 'claude', sessionId: 'aaaaaaaa-1111-4222-8333-444444444444' }
+
+await vscode.commands.executeCommand('agentviz.openSession', { provider: 'codex', sessionId: '0199aaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee' });
+```
+
+The argument is exactly `{ provider, sessionId }`:
+
+- `provider` is the string `claude` or `codex`.
+- `sessionId` is 1 to 128 letters, digits, `_` or `-`. For Claude it is the transcript's session ID (or a subagent's agent ID). For Codex it is the thread ID at the end of the rollout file name. Case is ignored.
+- Any other field, type or character is refused. There is no way to pass a file path, a folder or a filter.
+
+The session is looked up in the configured source folders, across all transcripts and not only the 80 listed, so an older session can be addressed. The transcript path always comes from that folder listing.
+
+The command resolves to one of:
+
+| Result | Meaning |
+| --- | --- |
+| `{ ok: true, provider, sessionId }` | The tab is open (created or reused) and follows that session. The view fills in on its next refresh. |
+| `{ ok: false, reason: 'invalid-argument' }` | The argument was not a valid address. Nothing was looked up. |
+| `{ ok: false, reason: 'not-found' }` | No transcript of that provider has that ID. A fragment of an ID does not match. |
+| `{ ok: false, reason: 'source-unavailable' }` | The session was not found and that provider's folder is missing or unreadable. |
+| `{ ok: false, reason: 'superseded' }` | A newer call, or a change to the source settings, arrived while this one was looking. |
+
+A refused call opens no tab and leaves an open tab on its current session. The command shows no message of its own; the caller decides what to tell the user. Calling it twice opens one tab. If one ID exists in two transcripts of a provider, a session's own transcript is preferred to a subagent's, then the most recently written. The result never contains a path, a name or a project.
+
+A caller should check that the extension `agentviz-local.agent-viz` is installed before offering the action. No AgentBoard caller exists yet; adding one is a change in that project.
+
 ## Reading the view
 
 The six stations stay in fixed positions: files, edits, shell, network, agents and memory. Thicker spokes mean more recorded calls. A station with recent activity is highlighted. A red station dot marks tool errors since the last user prompt. Unknown tool types count as Other.
@@ -46,7 +84,7 @@ npm run package
 
 Packaging creates `agent-viz-0.1.0.vsix` in the workspace. To try that package in your normal VS Code installation, use **Extensions: Install from VSIX**. The package uses a local publisher identifier and is not published to a marketplace.
 
-The unit tests use synthetic transcripts. `test/extension-host.js` runs inside VS Code's extension test host to check command activation, a single editor tab, closure and reopening. The retained development evidence is in the ignored artifacts folder.
+The unit tests use synthetic transcripts. `test/extension-host.js` runs inside VS Code's extension test host to check command activation, a single editor tab, closure and reopening. With `AGENTVIZ_HOST_FIXTURE` set to an empty folder that an isolated profile's `agentviz.claudeRoot` and `agentviz.codexRoot` point at, it also checks `agentviz.openSession` on synthetic transcripts; the header of that file gives the launch arguments. The retained development evidence is in the ignored artifacts folder.
 
 The packaging dependency overrides minimatch to a fixed upstream release series because VSCE 4.1.0 otherwise resolves a version flagged by npm audit. These packages are excluded from the VSIX.
 

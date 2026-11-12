@@ -14,7 +14,8 @@
   ],
   "main": "./src/extension.js",
   "activationEvents": [
-    "onCommand:agentviz.open"
+    "onCommand:agentviz.open",
+    "onCommand:agentviz.openSession"
   ],
   "extensionKind": [
     "ui"

@@ -36,10 +36,68 @@ function cleanQuery(value) {
 }
 const emptyCatalog = () => ({ sessions: [], warnings: [], workspaces: [], total: 0, matched: 0, limit: 0, pending: { workspaces: 0, names: 0 }, walk: null });
 
+const PROVIDERS = ['claude', 'codex'];
+const SESSION_ID = /^[\w-]{1,128}$/;
+// Discovery's own wording for a provider folder that is missing or cannot be listed.
+const SOURCE_WARNING = { claude: /^Claude (sessions folder not found|folder could not be read)/, codex: /^Codex (sessions folder not found|folder could not be read)/ };
+// The argument of agentviz.openSession, sent by another extension. Exactly { provider, sessionId }: a known
+// provider and an ID made of letters, digits, _ and - only. Nothing else is accepted, so a path, a pattern or an
+// extra field (file, root, query) can never reach discovery or the file system from here.
+function cleanTarget(value) {
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const keys = Object.keys(value);
+    if (keys.length !== 2 || !keys.includes('provider') || !keys.includes('sessionId')) return null;
+    const { provider, sessionId } = value;
+    if (typeof provider !== 'string' || !PROVIDERS.includes(provider) || typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) return null;
+    return { provider, sessionId };
+  } catch { return null; }
+}
+function sourceRoots() {
+  const config = vscode.workspace.getConfiguration('agentviz');
+  return { claudeRoot: config.get('claudeRoot') || path.join(os.homedir(), '.claude'), codexRoot: config.get('codexRoot') || path.join(os.homedir(), '.codex') };
+}
+
 let panel;
+// Set while a panel is open: makes that panel follow a session found in the current source.
+let follow;
+let requests = 0;
+
+// agentviz.openSession: opens (or reuses) the panel on one local session named by provider and session ID.
+// The session is looked up in the configured source folders; the transcript path always comes from that
+// listing, never from the argument. Answers { ok: true, provider, sessionId } or { ok: false, reason }, where
+// reason is invalid-argument, not-found, source-unavailable or superseded. A failed call opens and changes nothing.
+async function openSession(context, argument) {
+  const target = cleanTarget(argument);
+  if (!target) return { ok: false, reason: 'invalid-argument' };
+  const request = ++requests;
+  const roots = sourceRoots();
+  let discovered;
+  // The same lookup the ID filter uses (S03): every transcript is listed before any cap, so an older session
+  // can be addressed. No project or name is read here; an open panel may be reading those at the same time.
+  try { discovered = await discoverSessions(roots, { query: { id: target.sessionId }, headBudget: 0, titleBudget: 0 }); }
+  catch { return { ok: false, reason: 'source-unavailable' }; }
+  const now = sourceRoots();
+  // A newer call, or a source setting changed while this one was looking: its answer is for an old question.
+  if (request !== requests || now.claudeRoot !== roots.claudeRoot || now.codexRoot !== roots.codexRoot) return { ok: false, reason: 'superseded' };
+  // The ID filter matches fragments and is cut to the cap, so the exact comparison runs over the whole listing.
+  const wanted = target.sessionId.toLowerCase();
+  const matches = (discovered.all || discovered.sessions || []).filter(session => session.provider === target.provider && typeof session.sessionId === 'string' && session.sessionId.toLowerCase() === wanted);
+  // One ID in two transcripts: a session's own transcript before a subagent's, then the most recently written.
+  const found = matches.find(session => !session.child) || matches[0];
+  if (!found) return { ok: false, reason: (discovered.warnings || []).some(warning => SOURCE_WARNING[target.provider].test(warning)) ? 'source-unavailable' : 'not-found' };
+  openPanel(context);
+  follow(found);
+  return { ok: true, provider: found.provider, sessionId: found.sessionId };
+}
 
 function activate(context) {
-  context.subscriptions.push(vscode.commands.registerCommand('agentviz.open', () => {
+  // The Command Palette command takes no argument; anything passed to it is ignored.
+  context.subscriptions.push(vscode.commands.registerCommand('agentviz.open', () => openPanel(context)));
+  context.subscriptions.push(vscode.commands.registerCommand('agentviz.openSession', argument => openSession(context, argument)));
+}
+
+function openPanel(context) {
     if (panel) { panel.reveal(); return; }
     const media = vscode.Uri.joinPath(context.extensionUri, 'media');
     const current = vscode.window.createWebviewPanel('agentviz.activity', 'AgentViz', vscode.ViewColumn.One, { enableScripts: true, localResourceRoots: [media] });
@@ -70,8 +128,7 @@ function activate(context) {
         if (listingDue || lookupDue) {
           const asked = query;
           lookupDue = false;
-          const config = vscode.workspace.getConfiguration('agentviz');
-          const roots = { claudeRoot: config.get('claudeRoot') || path.join(os.homedir(), '.claude'), codexRoot: config.get('codexRoot') || path.join(os.homedir(), '.codex') };
+          const roots = sourceRoots();
           // A new filter, or names still being read, reuses the last folder listing; the folders are listed again every 10 seconds.
           let discovered = await discoverSessions(roots, { query: asked, keep: selected ? [selected.id] : [], walk: listingDue ? undefined : catalog.walk || undefined });
           if (disposed) return;
@@ -128,6 +185,22 @@ function activate(context) {
       } finally { busy = false; }
     }
 
+    const choose = next => {
+      if (!next || next.id === selected?.id) return;
+      generation++;
+      selected = next;
+      reader = null;
+      if (next.name === undefined) lookupDue = true;
+      void context.workspaceState.update('selectedSession', next.id);
+      void refresh();
+    };
+    follow = found => {
+      const known = index.get(found.id);
+      // Not in this panel's last folder listing (a new transcript, or a panel that has not listed yet): list
+      // again before deciding it is missing. Its name and project are read by the panel's own lookup.
+      if (!known) lastWalk = 0;
+      choose(known || { ...found, name: undefined });
+    };
     const messages = current.webview.onDidReceiveMessage(message => {
       if (!message || typeof message !== 'object') return;
       if (message.type === 'ready') {
@@ -152,15 +225,7 @@ function activate(context) {
       }
       else if (message.type === 'select' && typeof message.id === 'string') {
         // Only an ID present in the current source can be followed, whether or not it was in the returned list.
-        const next = index.get(message.id);
-        if (next && next.id !== selected?.id) {
-          generation++;
-          selected = next;
-          reader = null;
-          if (next.name === undefined) lookupDue = true;
-          void context.workspaceState.update('selectedSession', next.id);
-          void refresh();
-        }
+        choose(index.get(message.id));
       }
     });
     const visibility = current.onDidChangeViewState(() => { if (current.visible) { ready = true; void refresh(); } });
@@ -174,17 +239,17 @@ function activate(context) {
       reader = null;
       lastWalk = 0;
       void refresh(true);
-    });    const timer = setInterval(() => { void refresh(); }, 1000);
+    });
+    const timer = setInterval(() => { void refresh(); }, 1000);
     current.onDidDispose(() => {
       disposed = true;
       clearInterval(timer);
       messages.dispose();
       visibility.dispose();
       config.dispose();
-      if (panel === current) panel = undefined;
+      if (panel === current) { panel = undefined; follow = undefined; }
     });
     context.subscriptions.push(current);
-  }));
 }
 
 function deactivate() { if (panel) panel.dispose(); }

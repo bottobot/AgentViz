@@ -12,7 +12,7 @@ The executable schedule is `workflows/agentviz-next.plan.json`, named **AgentViz
 | S04 agent lanes | Implemented, awaiting board review | c15df0 (plan card a40b39) | See `git log` on `task/c15df0` (commit titled "feat: show main and subagent lanes (S04)") | `npm test` 71/71, `npm run check` exit 0, local sample 24 families; see S04 below |
 | S05 explicit task progress | Implemented, awaiting board review | d5e522 (plan card a40b39) | See `git log` on `task/d5e522` (commit titled "feat: show progress from explicit agent task lists (S05)") | `npm test` 83/83, `npm run check` exit 0; no local list records exist, see S05 below |
 | S06 file footprint | Implemented, awaiting board review | b43ef6 (plan card a40b39) | See `git log` on `task/b43ef6` (commit titled "feat: show a file activity footprint (S06)") | `npm test` 95/95, `npm run check` exit 0, local sample 40 + 40 transcripts; Codex not covered locally, see S06 below |
-| S07 AgentBoard entry command | Pending | Not allocated | None | Not run |
+| S07 AgentBoard entry command | Implemented, awaiting board review | aaa089 (plan card a40b39) | See `git log` on `task/aaa089` (commit titled "feat: add a narrow entry command for another extension (S07)") | `npm test` 102/102, `npm run check` exit 0, VS Code host run 13/13 checks; no AgentBoard caller exists, see S07 below |
 | S08 reliability and cost | Pending | Not allocated | None | Not run |
 | S09 Windows acceptance | Pending | Not allocated | None | Not run |
 | S10 review and local package | Pending | Not allocated | None | Not run |
@@ -494,4 +494,69 @@ Codex call shapes in those 40 rollouts (names and booleans only): 196 `exec` cal
 - Not run in a VS Code host. Drawn in headless Edge at 1280 px only; the narrow rule is in the stylesheet and untested in a browser. S09 owns host acceptance.
 - Contrast and screen reader output were not measured. Linux and VSCodium were not run.
 
-Next action: board review of `task/b43ef6`, then S07.
+Next action at the end of S06: board review of `task/b43ef6`, then S07 (now done, below).
+
+## S07: Provide a narrow AgentBoard entry point
+
+Owner: card `aaa089`, branch `task/aaa089`, AgentBoard worktree. Dependency commit: `42dd96c` (S06 integrated). Code commit: the commit on this branch titled "feat: add a narrow entry command for another extension (S07)". Review and integration: pending, done by the board.
+
+### Headline
+
+`agentviz.openSession` works in a real VS Code host on synthetic sessions of both providers. **No AgentBoard caller exists**, so no AgentBoard button was tested; that seam is pending work in the AgentBoard project.
+
+### What changed
+
+- `src/extension.js`: a second command, `agentviz.openSession`, with `cleanTarget` (argument check) and `openSession` (lookup). The panel body moved unchanged into `openPanel`; the `select` message and the command share one `choose` function. `agentviz.open` takes no argument and ignores one.
+- `package.json`: activation event `onCommand:agentviz.openSession`. The command is not contributed, so it is not in the Command Palette.
+- `README.md`: the command contract with synthetic examples.
+- `test/extension.test.js`: seven new tests; the host stand-in now records panels and reveals and can start without a panel.
+- `test/extension-host.js`: entry command checks, run only with a synthetic source folder.
+- Not touched: `src/sessions.js`, `src/transcript.js`, `media/`, `src/webview.js`. No new webview message.
+
+### Contract
+
+- Argument: exactly `{ provider: 'claude' | 'codex', sessionId }`. `sessionId` is 1 to 128 characters of `A-Z a-z 0-9 _ -`. Any other key, type or character is `invalid-argument`, decided before anything is looked up.
+- Lookup: `discoverSessions(roots, { query: { id }, headBudget: 0, titleBudget: 0 })`, the S03 query path. The folders are listed afresh. The exact comparison (provider, full ID, case ignored) runs over the uncut listing, so the 80 session cap does not apply. The transcript path comes only from that listing.
+- Result: `{ ok: true, provider, sessionId }`, or `{ ok: false, reason }` with `invalid-argument`, `not-found`, `source-unavailable` or `superseded`. No path, name, project or error text.
+- A refused call opens no panel and does not change an open one.
+- A panel that is open is reused and revealed. A session the panel has not listed yet makes it list the folders again, so it is not shown as missing.
+- Duplicates: the newest call wins; an older one still looking answers `superseded`. The same address again does not reload the session.
+- A source setting changed during the lookup answers `superseded`.
+- One ID in two transcripts of a provider: a non-subagent transcript first, then the most recently written.
+- `source-unavailable` is reported only when the session is not found and discovery warned that this provider's folder is missing or unreadable, or discovery itself failed.
+
+### AgentBoard seam (pending in that project)
+
+The sibling checkout was read only, at `1d4dbf9`. A search of its `src` for `agentviz` and `agent-viz`, ignoring case, found 0 matches; the same search for `executeCommand` found 31 in 6 files, so the search did run. Nothing there calls AgentViz. Pending there: check that `agentviz-local.agent-viz` is installed, map a card to `{ provider, sessionId }`, call the command and handle the four refusal reasons. Nothing was changed, installed or run in AgentBoard.
+
+### Checks (worktree, PowerShell 7, Node v26.7.0)
+
+| Command | Result |
+| --- | --- |
+| `node --test test/extension.test.js` with the new tests on the previous sources (`42dd96c`, extracted with `git archive`) | exit 1: 16 tests, 9 pass, 7 fail (all 7 are the new S07 tests) |
+| `npm test` on this branch | exit 0: 102 tests, 102 pass, 0 fail |
+| `npm run check` on this branch | exit 0 |
+| `Code.exe --extensionDevelopmentPath=<worktree> --extensionTestsPath=<worktree>\test\extension-host.js --user-data-dir=<temp profile> --extensions-dir=<temp folder> --disable-extensions --disable-workspace-trust --skip-welcome --skip-release-notes --new-window <empty folder>`, with `AGENTVIZ_HOST_FIXTURE=<temp fixture folder>` and the profile's `settings.json` pointing both roots at it | exit 0; result file `passed: true`, 13 checks, `notRun` empty, VS Code reports version 1.146.0 |
+
+Regressions added (7, all in `test/extension.test.js`): both providers and a session older than the returned list, on a new and on an open panel, with the provider as part of the address; absent, unknown and partial IDs with and without a panel; an unavailable source (missing folder, unreadable folder, failing discovery) without leaking the cause; 40 malicious arguments (paths, traversal, patterns, extra fields, wrong types, a throwing getter and proxy) that never reach discovery, plus the Command Palette command ignoring an argument; duplicate and out-of-order executions; an open panel that has not listed the session, a setting changed mid-lookup, and reopening a closed panel; real transcript files of both providers through the real `discoverSessions`, with the target outside the 80 returned and a missing Codex folder.
+
+Host run checks (13): the five existing ones (activation, editor opened, reuse, close, reopen), then invalid arguments refused, unknown ID opens nothing, Claude session opens the editor, duplicate execution keeps one editor, Codex session reuses the open editor, no-argument command unchanged, unavailable source reported, reopen after disposal.
+
+### Evidence
+
+`artifacts/s07/` in this worktree (git-ignored, local only, synthetic data): `extension-host-result.json` (the host run receipt) and `baseline-before-change.txt` (the failing run on the previous sources). The host run used a temporary profile, extensions folder and fixture folder outside the repository; the normal editor profile was not used and no extension was installed.
+
+### Gaps and limits
+
+- **No live AgentBoard button was tested**, and no cross-extension call from a second extension: the host test calls the command from the test runner inside the same extension host.
+- The host run observes the command's result and the editor tab count. Which session the webview then shows is proven by the unit tests on the host message, not in the real webview. S09 owns that.
+- The host test was not run on the previous sources; the failing baseline is the unit run above.
+- Each call lists every source folder again (about 0.6 s for 3,600 transcripts in the S03 measurement). It reads no transcript contents. Not measured again here.
+- `source-unavailable` depends on the wording of two discovery warnings. The real-file test fails if that wording changes.
+- With one provider folder missing, an unknown ID of the other provider is `not-found`. With the folder present but one subfolder unreadable, a session inside it is reported `source-unavailable`, and a truly absent ID is too.
+- The command shows no message to the user on a refusal. The caller must.
+- A Codex child's subagent status is not read by the lookup, so the tie-break between two transcripts with one ID may not know a Codex child. No such duplicate was observed.
+- The command is reachable by any extension in the window and by a keybinding with arguments. It can only select a session already in the configured source folders.
+- Linux and VSCodium were not run.
+
+Next action: board review of `task/aaa089`, then S08.
