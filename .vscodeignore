@@ -1,3 +1,13 @@
+# Allow-list. Everything is left out of the VSIX unless a line below lets it back in, so a new file in the
+# checkout (settings, notes, a copied transcript, evidence) cannot ship by accident.
+**
+!package.json
+!README.md
+!src/*.js
+!media/app.js
+!media/view.js
+!media/style.css
+# Explicit exclusions stay last so they win even if an allow rule above is widened later.
 .git/**
 .vscode/**
 node_modules/**
@@ -11,3 +21,7 @@ package-lock.json
 ORCHESTRATION.md
 workflows/**
 .agentboard/**
+.claude/**
+**/*.jsonl
+**/*.vsix
+**/.env*

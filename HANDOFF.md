@@ -1,6 +1,6 @@
 # AgentViz handoff
 
-Written 11 November 2026, at the end of an AgentBoard research session. Read this first, then `docs/research/2026-11-11-live-agent-visualizers-report.md`.
+First written 11 November 2026 at the end of an AgentBoard research session. The **State** section was rewritten on 12 November 2026 at the end of the run "AgentViz: find and follow sessions" (step S10). Read **State** first. Everything from "What Robert has decided" down is the original research handoff, kept as history.
 
 ## What this workspace is for
 
@@ -10,9 +10,78 @@ Why (Robert): long-horizon tasks are complex and hard to keep track of. Reading 
 
 ## State
 
-Development started on 11 November 2026. The workspace now has a Git repository, a standalone VS Code extension, Claude and Codex transcript adapters, and a stations map with an activity strip. The initial implementation uses Windows as its verification target and reads local transcripts directly. See `README.md` for running and checking it, and `docs/development/2026-11-11-first-slice.md` for the first slice's scope. The research and original decisions below remain historical context.
+The run **AgentViz: find and follow sessions** (`workflows/agentviz-next.plan.json`, plan card `a40b39`) has run all ten steps. S01 to S09 are integrated on the plan branch `task/a40b39` (head `e56805a`). S10, the release step, is delivered on `task/05f15f` and waits for the board's review and integration. Nothing was published, pushed, installed in the normal editor profile or changed in AgentBoard. Those are yours to decide.
 
-The next development batch is `workflows/agentviz-next.plan.json`, listed by AgentBoard's **Run a Plan** picker as **AgentViz: find and follow sessions**. `ORCHESTRATION.md` is its supporting product brief. The JSON file supplies the schedule, dependencies, checks and native model review. Its first priority is the user's requested navigation order: project/workspace, session name, session ID, with filtering. Those changes are pending. `docs/development/agentviz-next-run.md` records that no run has started. The corrected format audit is in `docs/development/2026-11-11-orchestration-format-audit.md`.
+The three lists below are deliberately separate. "Implemented" is not "verified".
+
+### Implemented
+
+- **Find a session by project, then name, then ID** (S01 to S03). Project is the transcript's recorded working directory. Name is the provider's saved title, else `Unnamed session`. ID is full or partial. Filters run over every transcript before the list is cut to 80. The followed session never switches on its own.
+- **Agent lanes** (S04): the followed session and its subagents on one time axis.
+- **Task list progress** (S05) from the agent's own list records.
+- **File activity footprint** (S06) from structured file tools.
+- **`agentviz.openSession`** (S07): a command another extension can call with `{ provider, sessionId }`.
+- **Hardening** (S08): five defects fixed, covering stale answers, bad dates, malformed lines and bad settings.
+- **Repeatable acceptance** (S09): `npm run host` and `npm run browser`, plus a light-theme contrast fix.
+- **Release packaging** (S10): the VSIX ignore file is now an allow-list, `npm run package:check` inspects a built VSIX, and `README.md` describes the current product.
+
+`README.md` is the description of current behaviour, privacy, launch steps and limits.
+
+### Verified (12 November 2026, native Windows 11, synthetic data)
+
+| Check | Command | Result |
+| --- | --- | --- |
+| unit | `npm test` | 127 of 127 pass |
+| syntax | `npm run check` | exit 0 |
+| package | `npm run package` | `agent-viz-0.1.0.vsix`, 11 entries: 9 product files plus 2 written by the tool |
+| package contents | `npm run package:check` | exit 0: exact inclusion set, no local path inside, files equal the checkout |
+| host | `npm run host` | exit 0: VS Code 1.146.0, 31 checks in the real webview, 1 optional check not run (clipboard) |
+| browser | `npm run browser` | exit 0: Edge 157 headless, 11 of 11 |
+
+Each receipt is separate. The host receipt comes from a real VS Code run, not from the unit tests. Detail and per-file checksums: `docs/development/agentviz-next-evidence.md`. Step by step record: `docs/development/agentviz-next-run.md`.
+
+Earlier steps also read real local transcripts, counts only, to check names, projects, lanes and footprints (S01, S03, S04, S06). No real transcript was read in S08 to S10.
+
+### Not verified
+
+- Linux, VSCodium, remote and web hosts.
+- A live call from AgentBoard. No caller exists there.
+- Screen reader output, high contrast themes, contrast of graphics.
+- A real task list record of either provider: none exists on this machine, so progress was tested on synthetic records only.
+- Structured Codex file edits: local Codex sessions use program text inside `exec`, so their footprint reads empty.
+- The packaged VSIX installed in an editor. The host check runs the checkout, and `package:check` proves the packaged files equal it.
+- The copy to clipboard in the default host run (it passed once in S09 with `--clipboard`).
+
+### Deferred
+
+- Subagent task lists and subagent file footprints are parsed but not passed to the view. The panels say "not loaded". The fix is in `src/sessions.js`, where lanes are built.
+- An AgentBoard button that calls `agentviz.openSession`. That is a change in the AgentBoard project.
+- Replay or scrubbing, more account folders, other providers.
+- A search box inside the project selector (947 projects on this machine make a long list).
+- Sending the once-a-second message only when something changed. Measured at 86 ms per message at full retention; left alone.
+
+### Review findings from S10
+
+One material finding, fixed: the VSIX ignore file was a deny-list, so a stray file in the checkout (a `.claude` settings file, a copied transcript, notes) would have shipped. Reproduced on synthetic files, fixed with an allow-list and a test that builds a real package beside such files.
+
+One finding fixed in passing: the old README shipped inside the VSIX and named the planning files.
+
+Findings recorded and not changed (none breaks the product contract; all are in the README limits):
+
+- A session ID is the transcript file name, shown as is. A file name holding a direction-override or zero-width character would display misleadingly. Names and labels are cleaned; IDs are not, so a copied ID still matches the file.
+- The same folder recorded in two spellings (`C:\Work\app` and `/c/Work/app`, or with `..`) is two projects.
+- Name search is literal: two spaces do not match one, and `istanbul` does not find `İstanbul`.
+- Saved names lose zero-width joiners, so some joined emoji show as separate ones.
+
+### Decisions waiting for you
+
+1. **Merge.** The plan branch is one commit behind `feat/first-activity-view` (`1b8819e`, the parallel-plan preparation). That commit edits one line each of `README.md` and `HANDOFF.md`, which this step rewrote, so expect a conflict there. Take this branch's version of both.
+2. **Version.** The package is still `0.1.0`, the same number as the first slice's build. Bump it before installing if you want to tell the two apart.
+3. **Install, push, publish.** Not done.
+
+### Where the earlier history is
+
+The first slice is `docs/development/2026-11-11-first-slice.md`. The plan's brief is `ORCHESTRATION.md`. The format audit is `docs/development/2026-11-11-orchestration-format-audit.md`.
 
 ## What Robert has decided
 

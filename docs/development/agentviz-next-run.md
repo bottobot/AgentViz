@@ -1,26 +1,31 @@
 # AgentViz execution record
 
-State: prepared, not launched. Baseline: `2a3025b`. The requested workspace/name/ID changes are pending. No AgentBoard root or child card has been allocated by this planning session.
+State: all ten steps run. S01 to S09 are integrated on the plan branch `task/a40b39` (head `e56805a`) and their cards read `done` on the board. S10 is delivered on `task/05f15f` and waits for the board's review and integration. Baseline: `2a3025b`; the plan branch started from `66a3d6e`. Nothing was pushed, published, installed in the normal editor profile or changed in AgentBoard.
 
-The executable schedule is `workflows/agentviz-next.plan.json`, named **AgentViz: find and follow sessions** in **Run a Plan**. `ORCHESTRATION.md` is the product brief. Use `workflows/checks.json` for named acceptance commands. Native plan steps and model review supply scheduling, acceptance and integration; the former manual orchestrator launch route is superseded.
+The executable schedule is `workflows/agentviz-next.plan.json`, named **AgentViz: find and follow sessions** in **Run a Plan**. `ORCHESTRATION.md` is the product brief. `workflows/checks.json` holds the named acceptance commands.
 
-| Outcome | Status | Board ID | Delivered commit | Acceptance evidence |
+Reconciled by S10 on 2026-11-12 from `git log` on the plan branch and the board's card list (read only). The per-step sections below were written by each step at delivery and are left as they were, including their "awaiting board review" lines; this table is the current state.
+
+| Outcome | Board card | Board status | Delivered commits on the plan branch | Acceptance evidence |
 | --- | --- | --- | --- | --- |
-| S01 workspace and saved names | Implemented, awaiting board review | 8a7300 (plan card a40b39) | `0808321` | `npm test` 31/31, `npm run check` exit 0; see S01 below |
-| S02 navigation filters | Implemented, awaiting board review | 153bc7 (plan card a40b39) | `14273a5` | `npm test` 50/50, `npm run check` exit 0, headless Edge 17/17; see S02 below |
-| S03 complete catalogue lookup | Implemented, awaiting board review | 6e5778 (plan card a40b39) | `6977d3e` | `npm test` 63/63, `npm run check` exit 0; see S03 below |
-| S04 agent lanes | Implemented, awaiting board review | c15df0 (plan card a40b39) | See `git log` on `task/c15df0` (commit titled "feat: show main and subagent lanes (S04)") | `npm test` 71/71, `npm run check` exit 0, local sample 24 families; see S04 below |
-| S05 explicit task progress | Implemented, awaiting board review | d5e522 (plan card a40b39) | See `git log` on `task/d5e522` (commit titled "feat: show progress from explicit agent task lists (S05)") | `npm test` 83/83, `npm run check` exit 0; no local list records exist, see S05 below |
-| S06 file footprint | Implemented, awaiting board review | b43ef6 (plan card a40b39) | See `git log` on `task/b43ef6` (commit titled "feat: show a file activity footprint (S06)") | `npm test` 95/95, `npm run check` exit 0, local sample 40 + 40 transcripts; Codex not covered locally, see S06 below |
-| S07 AgentBoard entry command | Implemented, awaiting board review | aaa089 (plan card a40b39) | See `git log` on `task/aaa089` (commit titled "feat: add a narrow entry command for another extension (S07)") | `npm test` 102/102, `npm run check` exit 0, VS Code host run 13/13 checks; no AgentBoard caller exists, see S07 below |
-| S08 reliability and cost | Implemented, awaiting board review | 5df10f (plan card a40b39) | See `git log` on `task/5df10f` (commit titled "fix: harden the combined view and record its cost (S08)") | `npm test` 117/117, `npm run check` exit 0, synthetic benchmark of 3,471 transcripts; not run in a webview, see S08 below |
-| S09 Windows acceptance | Implemented, awaiting board review | 72183c (plan card a40b39) | See `git log` on `task/72183c` (commit titled "test: make Windows acceptance repeatable (S09)") | `npm test` 123/123, `npm run check` exit 0, `npm run host` 31 checks (32 with `--clipboard`), `npm run browser` 11/11; Linux, VSCodium and a live AgentBoard caller unverified, see S09 below |
-| S10 review and local package | Pending | Not allocated | None | Not run |
+| S01 workspace and saved names | `8a7300` | done | `0808321`, record `f8d0d20` | `npm test` 31/31, `npm run check` exit 0; see S01 |
+| S02 navigation filters | `153bc7` | done | `14273a5`, record `ac51695` | `npm test` 50/50, check exit 0, headless Edge 17/17; see S02 |
+| S03 complete catalogue lookup | `6e5778` | done | `6977d3e`, record `95e5ca1` | `npm test` 63/63, check exit 0; see S03 |
+| S04 agent lanes | `c15df0` | done | `b233c9e` | `npm test` 71/71, check exit 0, local sample 24 families; see S04 |
+| S05 explicit task progress | `d5e522` | done | `82dbee6` | `npm test` 83/83, check exit 0; no local list records exist; see S05 |
+| S06 file footprint | `b43ef6` | done | `42dd96c` | `npm test` 95/95, check exit 0, local sample 40 + 40; Codex not covered locally; see S06 |
+| S07 AgentBoard entry command | `aaa089` | done | `9c8d2a0` | `npm test` 102/102, check exit 0, host run 13/13; no AgentBoard caller exists; see S07 |
+| S08 reliability and cost | `5df10f` | done | `a03ac6a` | `npm test` 117/117, check exit 0, synthetic benchmark of 3,471 transcripts; see S08 |
+| S09 Windows acceptance | `72183c` | done | `e56805a` | `npm test` 123/123, check exit 0, `npm run host` 31 checks, `npm run browser` 11/11; see S09 |
+| S10 review and local package | `05f15f` | running (this delivery) | the commit on `task/05f15f` titled "fix: package by allow-list, inspect the VSIX and hand off (S10)" | `npm test` 127/127, check exit 0, `npm run package` exit 0, `npm run package:check` exit 0, host 31 checks, browser 11/11; see S10 |
 
-Next action: open AgentBoard's **Run a Plan** picker in this workspace, select **AgentViz: find and follow sessions**, inspect the preview and choose Run. This record does not imply that the run is already approved or executing.
+**Review cards.** There are none to record. The plan uses AgentBoard's native model review of each delivery, and no separate review card was allocated for any step. The board keeps no review file for cards `8a7300` to `72183c`; their `done` status and their commits on the plan branch are the record of acceptance available to this step. This step did not see the review verdicts themselves.
 
-For each actual delivery append its owner/worktree, dependency commits, exact checks and exit results, review card/verdict, integration commit, blockers and next action. Keep the current next action concise enough for a replacement orchestrator to resume without replaying chat history.
+**Integration commits.** The board integrated each step by placing its commits on the plan branch; there are no merge commits. The integration commit of a step is therefore its delivered commit above, and the plan branch head after S09 is `e56805a`. **The final integration commit (S10 onto the plan branch, and the plan branch onto `feat/first-activity-view`) does not exist yet.** The board makes it after reviewing this delivery; a commit cannot name its own successor. Read it from `git log task/a40b39` afterwards.
 
+**Known merge note.** `feat/first-activity-view` holds one commit the plan branch does not: `1b8819e` (the parallel-plan preparation). It changes one line each of `README.md` and `HANDOFF.md`, both rewritten by S10, so that merge will conflict in those two files. This branch's version of both is the current one.
+
+Next action: board review of `task/05f15f`. Then Robert decides on the merge, a version number, installing, pushing and publishing. `HANDOFF.md` lists those decisions.
 ## S01: Identify workspaces and saved session names
 
 Owner: card `8a7300`, branch `task/8a7300`, AgentBoard worktree. Dependency commit: `66a3d6e`. Code commit: `0808321`. Review and integration: pending, done by the board.
@@ -735,4 +740,88 @@ Regressions added (6 unit tests in `test/host-runner.test.js`): the executable i
 - Observations left unchanged (in the evidence file): the empty area under the map at desktop width; equal ID fragments for subagents whose IDs share eight characters; the deleted session staying in the list; the real style source of a webview containing VS Code's own host pattern, which the S08 record did not show.
 - `README.md` does not mention `npm run host` or `npm run browser`. Pending for S10, which owns the README.
 
-Next action: board review of `task/72183c`, then S10.
+Next action at the end of S09: board review of `task/72183c`, then S10 (now done, below).
+
+## S10: Independently review, package and hand off
+
+Owner: card `05f15f`, branch `task/05f15f`, AgentBoard worktree. Dependency commit: `e56805a` (S09 integrated). Code commit: the commit on this branch titled "fix: package by allow-list, inspect the VSIX and hand off (S10)". Review and integration: pending, done by the board.
+
+### Headline
+
+The release is packaged and its contents are inspected. One material finding was reproduced and fixed: **the VSIX ignore file was a deny-list, so a stray private file in the checkout would have shipped.** No navigation, name or ID defect was found that breaks the product contract. Full detail: `docs/development/agentviz-next-evidence.md`, section "S10 release evidence".
+
+No file in `src/` or `media/` changed in this step.
+
+### What changed
+
+- `.vscodeignore`: now an allow-list. Everything is ignored, then `package.json`, `README.md`, `src/*.js` and the three `media` files are allowed. The earlier exclusions stay after the allow rules, plus `.claude/**`, `**/*.jsonl`, `**/*.vsix`, `**/.env*`.
+- `test/vsix-check.js` (new): reads a built VSIX with Node builtins and judges it. `package.json`: script `package:check`.
+- `test/package.test.js` (new, part of `npm test`): four tests.
+- `README.md`: rewritten for the current product. It ships in the VSIX, so it no longer names planning files. Adds the filters, lanes, progress, footprint, `npm run host`, `npm run browser`, `npm run package:check`, the timestamp window (pending from S08) and the full limits.
+- `HANDOFF.md`: the State section is replaced by implemented / verified / not verified / deferred, the review findings and the decisions left for Robert. The research handoff below it is unchanged.
+- `docs/development/agentviz-next-evidence.md`: a new first section for S10. The S09 text is unchanged apart from two headings.
+- This record: the reconciled table at the top and this section.
+
+### Review
+
+The product contract was read against the integrated host, discovery and view code. A temporary script then ran the real `discoverSessions` over 45 synthetic transcripts with awkward file names, working directories, titles and index rows. The table of cases and results is in the evidence file.
+
+| # | Finding | Outcome |
+| --- | --- | --- |
+| 1 | A deny-list `.vscodeignore` packages any file it does not name. With the old file the packaging tool listed a synthetic `.claude/settings.local.json`, two `.jsonl` transcripts, `notes.md` and a screenshot for inclusion. | **Fixed**, with a regression that builds a real package beside 23 synthetic stray files. |
+| 2 | The README that ships in the VSIX described the release as planned and named the plan files. | **Fixed**, with a regression. |
+| 3 | A session ID is the transcript file name and is shown uncleaned (direction-override or zero-width characters, up to the file name limit). Escaped wherever it is markup. | Recorded. Cleaning it would break "copy the ID" and needs `src/extension.js`. In the README limits. |
+| 4 | One folder recorded in two spellings is two projects (`/c/...`, `..`, forward-slash UNC). | Recorded. In the README limits. |
+| 5 | Name search is literal: repeated spaces and some case pairs (`istanbul` / `İstanbul`) do not match. | Recorded. In the README limits. |
+| 6 | Saved names lose zero-width joiners, so some emoji split. | Recorded. Cosmetic. |
+| 7 | The archive checksum of a VSIX differs on every build. | Recorded. Per-file checksums are the stable identity; `package:check` prints both. |
+
+### Checks (worktree, PowerShell 7, Node v26.7.0)
+
+| Command | Result |
+| --- | --- |
+| `node --test test/package.test.js` before the `.vscodeignore` change | exit 1: 3 tests, 1 pass, 2 fail (the ignore-rule test and the built-package test) |
+| the README test on the previous `README.md` | exit 1: "the shipped README does not mention workflows/" |
+| `npm test` | exit 0: 127 tests, 127 pass, 0 fail, 0 skipped |
+| `npm run check` | exit 0 |
+| `npm run package` | exit 0: `agent-viz-0.1.0.vsix`, 11 entries (9 product files, 2 written by the tool), 57,480 bytes |
+| `npm run package:check -- --receipt=artifacts/s10/vsix-check.json` | exit 0: exact inclusion set, no local path inside, every file equal to the checkout |
+| `npm run host` | exit 0: VS Code 1.146.0, 31 checks passed, 1 optional not run (clipboard), 35.8 s |
+| `npm run browser` | exit 0: Edge 157 headless, 11 of 11 |
+
+The host receipt is from a real VS Code development host with a temporary profile. It was not derived from the unit tests. It ran before the README rewrite; the `src/` and `media/` files it ran are the ones in the package (same per-file checksums before and after).
+
+Regressions added (4, all in `test/package.test.js`):
+
+1. `.vscodeignore` ignores everything first and allows only the product files; no `dependencies` or `files` in `package.json`. Fails on the old ignore file.
+2. The inspector passes only the exact product set: unexpected, missing and duplicate files, a local path inside a file, runtime dependencies, unreadable JSON, a stale file, an empty archive and a file that is not an archive all fail. New code; it has no "before".
+3. The shipped README describes this release and carries no orchestration material; every `npm run` command it names exists. Fails on the old README.
+4. A real package built in a temporary folder beside 23 synthetic stray files holds exactly the product set, with no stray content, and its files equal the checkout. Fails on the old ignore file. It is skipped, and says the package was not checked, when the packaging tool is not installed.
+
+The existing S08 test that names the old exclusion rules still passes; those rules are kept.
+
+### The package
+
+- File: `agent-viz-0.1.0.vsix` in the worktree root. Git-ignored, local only.
+- Inclusion set: `package.json`, `readme.md`, `src/extension.js`, `src/sessions.js`, `src/transcript.js`, `src/webview.js`, `media/app.js`, `media/view.js`, `media/style.css`, plus the tool's `extension.vsixmanifest` and `[Content_Types].xml`.
+- Archive SHA-256 of the build inspected: `55eb24c712e6813efd58d4127cc2b74fa1c54a9a2f914cc5a80fe40bfb82ad3c`. The board's `package` check builds again and that number will change; the per-file checksums in the evidence file will not, on a checkout with the same line endings.
+- Left out and checked: transcripts, settings, evidence under `artifacts/`, tests, documents, `ORCHESTRATION.md`, `workflows/`, `.agentboard/`, the lockfile and `node_modules`.
+
+### Evidence
+
+- `docs/development/agentviz-next-evidence.md`, first section: receipts, per-file checksums, the review cases and the findings.
+- In this worktree, git-ignored and local only, synthetic data: `artifacts/s10/` (`unit-run.txt`, `syntax-run.txt`, `package-run.txt`, `package-check-run.txt`, `vsix-check.json`, `host-run.txt`, `browser-run.txt`, `baseline-before-change.txt`, `deny-list-leak.txt`, `readme-test-on-old-readme.txt`, `package-test-after.txt`), `artifacts/host/extension-host-result.json` and `artifacts/browser/browser-check.json`.
+
+### Gaps and limits
+
+- **Not executed, by instruction:** publication, installation in the normal editor profile, remote push, any change in AgentBoard, and the merge into `feat/first-activity-view`.
+- **The VSIX was not installed anywhere.** The host check runs the checkout. `package:check` shows the packaged files equal the checkout.
+- **Review verdicts of S01 to S09 were not seen.** Their cards read `done` and their commits are on the plan branch.
+- **The final integration commit is not recorded here** because it does not exist until the board integrates this delivery.
+- **Still unverified from S09:** Linux, VSCodium, remote and web hosts; a live AgentBoard caller; screen reader output; high contrast themes; contrast of graphics; the clipboard in the default host run.
+- **Still open from earlier steps:** subagent task lists and footprints do not reach the view; no real task list record and no structured Codex file edit exists locally to test against.
+- The version is still `0.1.0`, the same as the first slice's build. Not bumped: the lockfile is outside this step's files.
+- `package:check` is not in `workflows/checks.json`, which this step does not own.
+- The findings numbered 3 to 6 above are unchanged in the code.
+
+Next action: board review of `task/05f15f`.

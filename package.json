@@ -55,7 +55,8 @@
     "check": "node --check src/extension.js && node --check src/transcript.js && node --check src/sessions.js && node --check src/webview.js && node --check media/view.js && node --check media/app.js",
     "host": "node test/host-runner.js",
     "browser": "node test/browser-check.js",
-    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license"
+    "package": "vsce package --no-dependencies --allow-missing-repository --skip-license",
+    "package:check": "node test/vsix-check.js"
   },
   "devDependencies": {
     "@vscode/vsce": "4.1.0"

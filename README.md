@@ -2,30 +2,65 @@
 
 A live picture of local Claude Code and Codex sessions in a separate VS Code editor tab.
 
-The next batch is available in AgentBoard's **Run a Plan** list as **AgentViz: find and follow sessions**, from `workflows/agentviz-next.plan.json`. It starts with project/workspace, session name and session ID filtering. `ORCHESTRATION.md` supplies the product brief, and `docs/development/agentviz-next-run.md` tracks the prepared, not launched state. These planned features are not part of the current first slice yet.
+Find a session by project, then saved name, then ID. Follow it through a stations map, agent lanes, task list progress, a file footprint and an activity strip. An example session lets you explore the view without showing real activity.
 
-The first version provides a session picker, a fixed stations map, category counts, a context meter when the source reports one, a thirty minute activity strip, and folded recent events. An example session lets you explore the view without displaying real session activity.
+Status: a local development build, verified on Windows 11 with desktop VS Code. It is not published. Linux and VSCodium are not verified. See [Limits](#limits).
 
-## Run during development
+## Run it
 
-Requires desktop VS Code 1.96 or newer. Node 22 or newer is needed for the development packaging tool.
+Requires desktop VS Code 1.96 or newer. Node 22 or newer is needed only for the tests and the packaging tool.
+
+During development:
 
 1. Open this workspace in VS Code.
 2. Press F5 and select **Run AgentViz**. This opens an Extension Development Host.
 3. In that window, run **AgentViz: Open Activity** from the Command Palette.
-4. Pick a local session. Use **Show example** to inspect the synthetic example.
+4. Choose a project, type part of a name or an ID, then pick a session. **Show example** shows the synthetic example.
 
-There is no compilation or dependency installation required to run the extension. The development dependencies are used to package a VSIX.
+From a package: run `npm ci --ignore-scripts`, `npm run package`, then **Extensions: Install from VSIX** and choose `agent-viz-0.1.0.vsix`. The package uses a local publisher identifier (`agentviz-local`). Installing it is your decision; no check here installs it.
+
+Running the extension needs no compilation and no installed dependency.
+
+## Finding a session
+
+The filters are, in order: **Project / workspace**, **Session name**, **Session ID (optional)**, then the **Session** list.
+
+- **Project** is the working directory recorded in the transcript. Two directories with the same name stay separate and get longer labels. **All projects** removes the filter.
+- **Name** is the title the provider saved: a Claude custom title, else a Claude generated title, else the Codex thread name. A session with none reads `Unnamed session`. Prompts are never used as a name.
+- **ID** matches the full session ID or any part of it.
+- Name and ID ignore case and surrounding spaces, and both apply inside the chosen project.
+- Each entry reads `project › name · ID · provider · time`. Sessions with the same name are told apart by project and ID.
+- The bar under the filters names the followed session with its full ID. **Copy ID** copies it.
+- Escape empties a filter. **Clear filters** resets all three.
+
+Filters run over every transcript found, before the list is cut to the 80 most recently written matches. So an old project or an old ID can be found. The status line says how many sessions exist, how many match, and what is still being read.
+
+The followed session never changes on its own. If a filter hides it, it stays followed and the bar says it is hidden. If it is renamed, gets new activity or drops out of the newest 80, only its label changes. If its transcript is deleted, it stays named and is reported as missing.
+
+## Reading the view
+
+- **Where the work went.** Six fixed stations: files, edits, shell, network, agents, memory. Thicker spokes mean more recorded calls. A red dot marks tool errors since the last user prompt. Unknown tools count as Other.
+- **Agent lanes.** The followed session first, its subagents indented under it, on one time axis. A lane shows an end only where the source recorded one; otherwise it says "No end recorded". Codex parents do not record a child's end.
+- **Task list progress.** Completed of total, plus the current item, from the agent's own task list (`TodoWrite`, `TaskCreate`/`TaskUpdate`/`TaskList`, Codex `update_plan`). It is the agent's plan, not measured project completion. With no list record it reads "Unavailable"; tool activity is never used to estimate progress.
+- **File activity.** Reads and edits per file from structured file tools, twelve files ranked, with `EDITED 3+ TIMES` after three recorded edits. Labels are at most the last two path segments.
+- **Activity over time.** Thirty minutes, one bar per thirty seconds. Height is call volume, colour is the dominant kind, red ticks are tool errors, dots are prompts, turn ends and compactions.
+- **Context window.** Shown only when the source reports usage and capacity. Claude context is currently unavailable.
+
+One counting rule applies everywhere: totals cover the followed session plus the subagent lanes shown, over loaded, retained history. Each call counts once, in the lane of the agent that made it. Starting a subagent counts in the parent's lane. The headings state the scope.
+
+Quiet means no transcript records for thirty seconds. It is not a process health check. Turn complete means the source recorded a completed turn, not that the project is finished.
 
 ## Sources and privacy
 
-AgentViz reads the projects folder inside your local `.claude` directory and the sessions folder inside your local `.codex` directory. Use the machine settings `agentviz.claudeRoot` and `agentviz.codexRoot` for other configuration folders. No configuration files, credentials or environment variables are read by AgentViz.
+AgentViz reads the `projects` folder inside your local `.claude` directory and the `sessions` folder plus `session_index.jsonl` inside your local `.codex` directory. The machine settings `agentviz.claudeRoot` and `agentviz.codexRoot` point it at other configuration folders. No credentials, configuration files or environment variables are read.
 
-Discovery scans transcript metadata and lists the 80 most recently modified sessions, including child transcripts as separate entries. An already selected session stays available if newer sessions move it outside the list. The selected transcript is read incrementally about once per second while the tab is visible. New sessions are discovered about every ten seconds or on Refresh. Closing the tab stops polling.
+The view receives: opaque project keys with short labels, saved session names, session IDs, tool categories, safe tool names, file labels of at most two path segments, hostnames, a command's first word, task list labels, timestamps and outcomes. It does not receive prompts, reasoning, code, command arguments, tool output, file contents, patch bodies, full paths, or URL paths and queries.
 
-The webview receives tool categories, safe names, file names with at most two path parts, hostnames, timestamps and outcomes. Prompt text, thinking text, code, command arguments, full source paths, URL paths and queries, and tool output are excluded. Labels still reveal project names, file names and hostnames, so treat screenshots of real sessions accordingly.
+Names, project labels, file labels and hostnames are still real. Treat screenshots of real sessions accordingly.
 
-The extension makes no network requests, uses no model tokens, installs no hooks, starts no server, opens no port and writes no transcript files. The view uses plain SVG and local CSS and JavaScript. There are no runtime dependencies.
+The extension makes no network requests, uses no model tokens, installs no hooks, starts no server, opens no port and writes no transcript files. The view is plain SVG, CSS and JavaScript under a content security policy that allows scripts by nonce only. There are no runtime dependencies.
+
+The selected transcript is read incrementally about once per second while the tab is visible. Folders are listed about every ten seconds or on **Refresh**. Hiding the tab pauses all reading; closing it stops it.
 
 ## Opening a session from another extension
 
@@ -65,35 +100,54 @@ A refused call opens no tab and leaves an open tab on its current session. The c
 
 A caller should check that the extension `agentviz-local.agent-viz` is installed before offering the action. No AgentBoard caller exists yet; adding one is a change in that project.
 
-## Reading the view
-
-The six stations stay in fixed positions: files, edits, shell, network, agents and memory. Thicker spokes mean more recorded calls. A station with recent activity is highlighted. A red station dot marks tool errors since the last user prompt. Unknown tool types count as Other.
-
-Each activity bar covers a fixed thirty second interval. Height indicates call volume, color indicates the dominant category, red ticks indicate tool errors, and dots indicate user prompts, turn boundaries or compactions. Empty intervals remain visible. The strip covers the last thirty minutes; category counts cover the loaded, retained history.
-
-Quiet means no transcript records for thirty seconds. It is not a process health check. Turn complete means the source recorded a completed turn, not that the whole project is finished. Context is unavailable unless a source provides usage and capacity. Claude context is currently unavailable.
-
 ## Development checks and packaging
 
 ```powershell
 npm ci --ignore-scripts
-npm test
-npm run check
-npm run package
+npm test                 # unit: Node tests on synthetic transcripts
+npm run check            # syntax of the production files
+npm run host             # real VS Code host, isolated temporary profile, synthetic sources
+npm run browser          # headless Edge or Chrome at 1280, 600 and 360 px
+npm run package          # builds agent-viz-0.1.0.vsix
+npm run package:check    # lists the VSIX contents and checksums; fails on anything unexpected
 ```
 
-Packaging creates `agent-viz-0.1.0.vsix` in the workspace. To try that package in your normal VS Code installation, use **Extensions: Install from VSIX**. The package uses a local publisher identifier and is not published to a marketplace.
+Each check proves only what it names. `npm test` does not prove the extension works in VS Code; `npm run host` does that, and opens a VS Code window for about 40 seconds. `npm run host` and `npm run browser` write receipts under `artifacts/`, which is not committed.
 
-The unit tests use synthetic transcripts. `test/extension-host.js` runs inside VS Code's extension test host to check command activation, a single editor tab, closure and reopening. With `AGENTVIZ_HOST_FIXTURE` set to an empty folder that an isolated profile's `agentviz.claudeRoot` and `agentviz.codexRoot` point at, it also checks `agentviz.openSession` on synthetic transcripts; the header of that file gives the launch arguments. The retained development evidence is in the ignored artifacts folder.
+The VSIX holds nine product files: `package.json`, this README, four files in `src/` and three in `media/`. `.vscodeignore` is an allow-list, so a new file in the checkout stays out until it is allowed. The archive's own checksum changes with every build because it stores build times; the per-file checksums printed by `npm run package:check` do not.
 
-The packaging dependency overrides minimatch to a fixed upstream release series because VSCE 4.1.0 otherwise resolves a version flagged by npm audit. These packages are excluded from the VSIX.
+The packaging dependency overrides minimatch to a fixed upstream release series because VSCE 4.1.0 otherwise resolves a version flagged by npm audit. Development packages are not in the VSIX.
 
-## Limits of the first slice
+## Limits
 
-Transcript formats are undocumented and may change. Unknown record types are skipped. Damaged JSON lines are counted and reported. Records above 4 MB are skipped with a visible warning. Each refresh reads at most 8 MB, with a loading state while earlier history catches up. At most 10000 normalized events are retained per selected session, and omitted history is disclosed. The map and strip use those retained events.
+Not verified: Linux, VSCodium, remote and web hosts, screen reader output, high contrast themes, and a live call from AgentBoard.
 
-A 64 KB header preview supplies session picker project names. A large first record can leave the project name unavailable until the session is selected. Symbolic links encountered during directory discovery are not followed. Rewrite detection compares the first and last 4 KB previously read. Edits wholly between those samples can be missed; Refresh rereads the selected transcript from the beginning.
+Provider coverage on the development machine:
 
-Shell errors are detected from structured error fields and explicit exit codes; unknown result formats can miss errors. A Codex exec wrapper can contain multiple nested tools. AgentViz counts the recorded outer call once and uses the inner tool names only for its category.
+- No real task list record of either provider was found there, so task list progress is tested on synthetic records only and reads "Unavailable" for those sessions.
+- Local Codex sessions edit files through program text inside `exec`, which is never parsed. Their file activity reads "No file paths are recorded". Structured Codex `apply_patch` is tested on synthetic records only.
+- Task lists and file activity of subagent lanes are not loaded yet. The panels say so. Lane calls are counted in the stations and the strip.
 
-Subagent lanes, todo progress, file footprint, AgentBoard card links, replay controls, automatic discovery of additional account folders, and Linux verification remain for later slices. No borrowed source code is included; the initial direction comes from the research and handoff already in this workspace.
+Disclosed limits, each stated in the view when reached:
+
+- 80 sessions returned per lookup, after filtering.
+- 10000 events retained per transcript; 24 subagent lanes; 2000 events per lane.
+- 8 MB of the followed transcript and 24 MB of subagent transcripts read per pass, with a loading state.
+- 1500 first project reads and 256 MB of saved-name reading per lookup. A first name search across thousands of large transcripts can take tens of seconds; matches appear as it goes.
+- Records above 4 MB are skipped and counted. Damaged lines are counted.
+- A record dated before 2000, or more than a day after this machine's clock, is counted as malformed and adds no activity.
+- The newest 8 MB of the Codex name index is read. A title record above 64 KB is ignored.
+
+Other limits:
+
+- Transcript formats are undocumented and may change. Unknown record types are skipped.
+- A 64 KB preview supplies the project. A larger first record leaves the project as "Unknown workspace".
+- Rewrite detection compares the first and last 4 KB previously read. Edits wholly between those samples can be missed; Refresh rereads the selected transcript from the beginning.
+- Projects are compared as recorded. The same folder written as `C:\Work\app` and `/c/Work/app`, or reached through a link, is two projects.
+- A session ID is the transcript's file name and is shown as it is. Names and labels have control and direction-override characters removed; IDs do not.
+- Name search matches the cleaned title literally, including the text `Unnamed session`.
+- Subagent transcripts have no saved title and read `Unnamed session`.
+- Shell errors are detected from structured error fields and explicit exit codes; unknown result formats can miss errors. A Codex exec wrapper is counted once.
+- Symbolic links met during folder discovery are not followed.
+
+Replay controls, automatic discovery of additional account folders and an AgentBoard button remain for later work. No borrowed source code is included.
