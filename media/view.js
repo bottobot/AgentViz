@@ -55,7 +55,7 @@
       ${stations.map(station => {
         const count = summary.counts[station.kind];
         const active = activeKind === station.kind;
-        return `<g class="station ${station.kind} ${active ? 'active' : ''}">
+        return `<g class="station ${station.kind} ${active ? 'active' : ''} clickable" data-open="station:${station.kind}">
           <path d="M260 234L${station.x} ${station.y}" class="spoke ${count ? 'used' : ''}" stroke-width="${count ? Math.min(8, 1 + Math.log2(count + 1)) : 1}"/>
           <circle cx="${station.x}" cy="${station.y}" r="25" class="station-ring"/>
           <text x="${station.x}" y="${station.y + 4}" class="station-icon">${station.icon}</text>
@@ -77,7 +77,7 @@
       ${buckets.map((bucket, index) => {
         const kind = Object.keys(bucket.counts).sort((a, b) => bucket.counts[b] - bucket.counts[a])[0] || 'other';
         const height = bucket.total ? Math.max(4, bucket.total / max * 56) : 1;
-        return `<g class="${kind}"><title>${clock(bucket.start)}: ${bucket.total} calls${bucket.errors ? `, ${bucket.errors} errors` : ''}${bucket.markers.length ? `, ${bucket.markers.join(', ')}` : ''}</title>
+        return `<g class="${kind}${bucket.total || bucket.markers.length ? ' clickable' : ''}"${bucket.total || bucket.markers.length ? ` data-open="bar:${bucket.start}"` : ''}><title>${clock(bucket.start)}: ${bucket.total} calls${bucket.errors ? `, ${bucket.errors} errors` : ''}${bucket.markers.length ? `, ${bucket.markers.join(', ')}` : ''}</title>
           <rect x="${index * 15 + 2}" y="${76 - height}" width="10" height="${height}" rx="2" class="activity-bar ${bucket.total ? '' : 'silent'}"/>
           ${bucket.errors ? `<rect x="${index * 15 + 5}" y="10" width="3" height="66" class="error-tick"/>` : ''}
           ${bucket.markers.length ? `<circle cx="${index * 15 + 7}" cy="7" r="3" class="marker"/>` : ''}</g>`;
@@ -85,20 +85,51 @@
     </svg>`;
   }
 
-  function recent(events) {
+  // The Recent activity rows, newest first: runs of the same label, kind and outcome folded into one row that
+  // keeps its member events, so a click on the row lists every call behind it.
+  function recentGroups(events) {
     const groups = [];
     for (const event of events) {
       const last = groups.at(-1);
       if (last && last.label === event.label && last.kind === event.kind && last.outcome === event.outcome) {
         last.count++;
         last.time = event.time;
-      } else groups.push({ ...event, count: 1 });
+        last.members.push(event);
+      } else groups.push({ ...event, count: 1, members: [event] });
     }
-    return groups.slice(-8).reverse().map(event => `<li class="event ${escape(event.kind)}">
+    return groups.slice(-8).reverse();
+  }
+
+  function recent(events) {
+    return recentGroups(events).map((event, index) => `<li class="event ${escape(event.kind)}"><button type="button" class="event-open" data-open="recent:${index}" aria-label="${escape(`Show details: ${event.label}${event.count > 1 ? `, ${event.count} times` : ''}${event.outcome === 'error' ? ', error' : ''}, ${clock(event.time)}`)}">
       <span class="event-dot ${event.outcome === 'error' ? 'failed' : ''}" aria-hidden="true"></span>
       <span class="event-label">${escape(event.label)}${event.count > 1 ? ` <span class="repeat">×${event.count}</span>` : ''}</span>
       <span class="event-outcome">${event.outcome === 'error' ? 'Error' : event.outcome === 'running' ? 'Started' : ''}</span>
-      <time>${clock(event.time)}</time></li>`).join('');
+      <time>${clock(event.time)}</time></button></li>`).join('');
+  }
+
+  // Details on click: the events one clickable thing stands for, newest first, each with the lane it belongs to.
+  // `spec` is the data-open value: station:<kind>, bar:<start>, recent:<row>, lane:<key> or file:<key>.
+  function eventsFor(session, spec, now = Date.now()) {
+    const lanes = familyLanes(session);
+    const events = familyEvents(lanes);
+    const [type, ...rest] = String(spec || '').split(':');
+    const value = rest.join(':');
+    let picked = [];
+    let lane = null;
+    if (type === 'station') picked = events.filter(event => event.kind === value);
+    else if (type === 'bar') { const start = Number(value); picked = Number.isFinite(start) ? events.filter(event => event.time >= start && event.time < start + 30000 && event.time <= now) : []; }
+    else if (type === 'recent') picked = recentGroups(events)[Number(value)]?.members || [];
+    else if (type === 'lane') { lane = lanes.find(entry => entry.key === value) || null; picked = lane ? lane.events.map(event => ({ ...event, lane: lane.key, laneName: laneName(lane) })) : []; }
+    else if (type === 'file') {
+      const file = (Array.isArray(session.footprint?.files) ? session.footprint.files : []).find(entry => entry && entry.key === value);
+      const ids = new Set(Array.isArray(file?.events) ? file.events : []);
+      picked = events.filter(event => event.lane === lanes[0].key && ids.has(event.id));
+      return { title: file ? `File ${file.label}` : 'File', events: picked.slice().reverse(), lane: null, file };
+    }
+    const station = stations.find(entry => entry.kind === value);
+    const title = type === 'station' ? `${station ? station.name : 'Other'} calls` : type === 'bar' ? `Activity ${clock(Number(value))}–${clock(Number(value) + 30000)}` : type === 'recent' ? (picked[0]?.label || 'Recent activity') : type === 'lane' ? (lane ? laneName(lane) : 'Lane') : 'Details';
+    return { title, events: picked.slice().reverse(), lane, facts: lane ? laneFacts(lane) : null };
   }
 
   // Agent lanes (S04). Counting rule, used by the stations, the totals, the strip, the recent list and the lanes
@@ -120,12 +151,14 @@
 
   const laneName = lane => lane.depth === 0 ? (lane.role === 'subagent' ? 'Followed subagent' : 'Main session') : String(lane.label || 'Subagent');
 
+  // Each event keeps the key and name of its lane, so a click can ask the host about it in the right transcript.
   function familyEvents(lanes) {
-    if (lanes.length === 1) return lanes[0].events;
-    const merged = [...lanes[0].events];
+    const mainName = laneName(lanes[0]);
+    const merged = lanes[0].events.map(event => ({ ...event, lane: lanes[0].key, laneName: mainName }));
+    if (lanes.length === 1) return merged;
     for (const lane of lanes.slice(1)) {
       const name = laneName(lane);
-      for (const event of lane.events) merged.push({ ...event, label: `${event.label} · ${name}` });
+      for (const event of lane.events) merged.push({ ...event, label: `${event.label} · ${name}`, lane: lane.key, laneName: name });
     }
     // Stable sort: records with the same time keep main first, then lane order.
     return merged.sort((a, b) => a.time - b.time);
@@ -223,7 +256,7 @@
         track += [...columns].map(([column, failed]) => `<rect x="${column * 6}" y="4" width="5" height="10" rx="1" class="lane-tick ${failed ? 'failed' : ''}"/>`).join('');
       }
       return `<li class="lane depth-${Math.min(4, lane.depth)}${lane.missing ? ' missing' : ''}">
-        <div class="lane-name">${lane.depth ? '<span aria-hidden="true">↳ </span>' : ''}<b>${escape(name)}</b>${lane.depth ? ` <span class="lane-id">${escape(String(lane.key).slice(0, 8))}</span>` : ''}</div>
+        <div class="lane-name">${lane.depth ? '<span aria-hidden="true">↳ </span>' : ''}<button type="button" class="link-button" data-open="lane:${escape(lane.key)}"><b>${escape(name)}</b></button>${lane.depth ? ` <span class="lane-id">${escape(String(lane.key).slice(0, 8))}</span>` : ''}</div>
         <svg class="lane-track" viewBox="0 0 900 18" preserveAspectRatio="none" role="img" aria-label="${escape(name)} on the shared time axis. ${escape(facts)}">${track}</svg>
         <p class="lane-facts">${escape(facts)}</p></li>`;
     }).join('');
@@ -362,7 +395,7 @@
     const mismatch = facts.loaded && !facts.agrees ? '<p class="footprint-gap" role="status">These file counts do not match the station totals for this lane; the two were not taken from the same records.</p>' : '';
     if (!facts.loaded) return `<p class="muted">File activity was not sent for this transcript.</p>${coverage}`;
     if (!facts.files.length) return `<p class="muted">No file paths are recorded in the retained history of this transcript.</p>${rule}${mismatch}${outside}${coverage}`;
-    const rows = facts.files.map(file => `<li>${fileLabel(file)}<span class="file-counts">${plural(file.reads, 'read')} · ${plural(file.edits, 'edit')}${file.failed ? ` · ${file.failed} failed` : ''}</span>${file.hot ? `<span class="file-hot">EDITED ${HOT_EDITS}+ TIMES</span>` : ''}</li>`).join('');
+    const rows = facts.files.map(file => `<li><button type="button" class="link-button" data-open="file:${escape(file.key)}">${fileLabel(file)}</button><span class="file-counts">${plural(file.reads, 'read')} · ${plural(file.edits, 'edit')}${file.failed ? ` · ${file.failed} failed` : ''}</span>${file.hot ? `<span class="file-hot">EDITED ${HOT_EDITS}+ TIMES</span>` : ''}</li>`).join('');
     const more = facts.total - facts.files.length;
     const shared = facts.files.some(file => file.shared) ? '<p class="muted">Different files with the same short label are told apart by the code after the label.</p>' : '';
     return `<ol class="file-list">${rows}</ol>
@@ -479,14 +512,14 @@
       <span class="status ${!quiet && session.status === 'active' && !options.example ? 'receiving' : ''}"><span aria-hidden="true"></span>${status}</span></header>
       ${warnings.length ? `<aside class="notice" role="status">${warnings.map(escape).join(' ')}</aside>` : ''}
       <div class="workspace-grid"><section class="map-panel panel"><div class="panel-heading"><h2>Where the work went</h2><span>FIXED STATIONS · ${escape(scope.toUpperCase())}</span></div>${map(summary, activeKind)}
-        <div class="station-totals">${stations.map(station => `<span class="${station.kind}"><i aria-hidden="true"></i>${station.name}<b>${summary.counts[station.kind]}</b></span>`).join('')}${summary.counts.other ? `<span class="other">Other<b>${summary.counts.other}</b></span>` : ''}</div></section>
+        <div class="station-totals">${stations.map(station => `<button type="button" class="${station.kind}" data-open="station:${station.kind}" aria-label="${station.name}: ${plural(summary.counts[station.kind], 'call')}. Show them"><i aria-hidden="true"></i>${station.name}<b>${summary.counts[station.kind]}</b></button>`).join('')}${summary.counts.other ? `<button type="button" class="other" data-open="station:other" aria-label="Other: ${plural(summary.counts.other, 'call')}. Show them">Other<b>${summary.counts.other}</b></button>` : ''}</div></section>
       <section class="detail-panel"><div class="metrics"><div><span>RECORDED CALLS</span><strong>${summary.total}</strong></div><div><span>TOOL ERRORS</span><strong class="${summary.errors ? 'error-number' : ''}">${summary.errors}</strong></div></div>
       <div class="context-block panel"><div class="context-title"><h2>Context window</h2><span>${context === null ? 'Unavailable' : `${session.context}%`}</span></div>
         ${context === null ? '<p class="muted">This source has not reported usage and capacity.</p>' : `<meter min="0" max="100" low="70" high="90" optimum="0" value="${context}" aria-label="Context window usage">${context}%</meter><p class="muted">Reported by the session. Amber at 70%, red at 90%.</p>`}</div>
       ${progressPanel(session, lanes)}
       ${footprintPanel(session, lanes)}
       <div class="recent-panel panel"><div class="panel-heading"><h2>Recent activity</h2><span>SIMILAR EVENTS FOLDED</span></div><ol>${recent(events) || '<li class="muted">No tool activity recorded yet.</li>'}</ol></div>
-      <p class="privacy-note">Names only. Prompts, command arguments and tool output stay out of this view. Task list labels appear only under Task list progress. File labels are at most the last two segments of a path.</p></section></div>
+      <p class="privacy-note">Click a station, a recent item, a lane, a file or a bar for details. Commands, output, messages, model and tokens are read from the transcript only when you ask, and shown only in the details panel.</p></section></div>
       ${lanesPanel(lanes, session.family)}
       <section class="timeline-panel panel"><div class="panel-heading"><h2>Activity over time</h2><span>LAST 30 MINUTES · 30s PER BAR · ${escape(scope.toUpperCase())}</span></div>${timeline(events, now)}
       <div class="timeline-labels"><span>${clock(Math.floor(now / 30000) * 30000 - 59 * 30000)}</span><span>Gaps = silence <i class="legend-error"></i> tool error <i class="legend-marker"></i> turn / compaction</span><span>Now</span></div></section>
@@ -526,8 +559,9 @@
         const name = event.label.split(' ')[1];
         if (!name || !name.includes('.')) { totals[reading ? 'unnamedReads' : 'unnamedEdits']++; continue; }
         totals[reading ? 'readCalls' : 'editCalls']++;
-        const entry = files.get(name) || { key: `f:demo${String(files.size).padStart(16, '0')}`, label: name, reads: 0, edits: 0, failed: 0, shared: false };
+        const entry = files.get(name) || { key: `f:demo${String(files.size).padStart(16, '0')}`, label: name, reads: 0, edits: 0, failed: 0, shared: false, events: [] };
         files.set(name, entry);
+        entry.events.push(event.id);
         if (event.outcome === 'error') { entry.failed++; totals.failedCalls++; }
         else { entry[reading ? 'reads' : 'edits']++; totals[reading ? 'reads' : 'edits']++; }
       }
@@ -561,7 +595,7 @@
     }));
   }
 
-  const api = { summarize, activityBuckets, render, demoSession, progressFacts, footprintFacts, familyLanes, familyEvents, laneCounts, laneFacts, laneAxis, demoCatalogue, demoIdentity, filterSessions, navigate, workspaceChoices, idLabels, sessionLabel };
+  const api = { summarize, activityBuckets, render, recentGroups, eventsFor, kinds, demoSession, progressFacts, footprintFacts, familyLanes, familyEvents, laneCounts, laneFacts, laneAxis, demoCatalogue, demoIdentity, filterSessions, navigate, workspaceChoices, idLabels, sessionLabel };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.AgentViz = api;
 })(typeof globalThis === 'undefined' ? this : globalThis);

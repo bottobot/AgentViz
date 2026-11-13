@@ -44,6 +44,8 @@ function workspaceIdentity(cwd) {
 // Kept per file: an opaque key and a label of at most the last two path segments. The path stays in the host.
 // WARNING: bounded list; only this many ranked files are sent to the view, and the view says how many are not.
 const FOOTPRINT_FILES = 12;
+// WARNING: bounded list; a file row names at most this many of its newest calls.
+const FILE_EVENTS = 200;
 const PATH_LENGTH = 2048;
 const PATCH_FILES = 50;
 const READ_TOOLS = /^(read|read_file|view_image)$/;
@@ -121,7 +123,10 @@ function fileFootprint(events) {
     if (failed) totals.failedCalls++;
     for (const target of targets) {
       let entry = files.get(target.key);
-      if (!entry) files.set(target.key, entry = { key: target.key, label: target.label, reads: 0, edits: 0, failed: 0, shared: false });
+      if (!entry) files.set(target.key, entry = { key: target.key, label: target.label, reads: 0, edits: 0, failed: 0, shared: false, events: [] });
+      // The calls behind this row, newest kept, so a click on the file can list them (details on click).
+      entry.events.push(event.id);
+      if (entry.events.length > FILE_EVENTS) entry.events.shift();
       if (failed) entry.failed++;
       else { entry[reading ? 'reads' : 'edits']++; totals[reading ? 'reads' : 'edits']++; }
     }
@@ -186,7 +191,14 @@ function createSession(provider, id) {
     // Host only (S04): what this transcript records about agents it started. Never sent to the view as is.
     // spawns: by the parent's call ID; agents: by child agent ID; notices: the first end report per child agent ID.
     lifecycle: { value: { spawns: new Map(), agents: new Map(), notices: new Map() } },
-    agentLabel: { value: '', writable: true }
+    agentLabel: { value: '', writable: true },
+    // Host only (details on click): the byte position of the record being applied, set by the reader; the position
+    // of the record that started the current turn; and the model the source last named. Events keep these numbers
+    // so the host can read the call, its result and its turn again from the transcript when the view asks.
+    position: { value: -1, writable: true },
+    turnAt: { value: -1, writable: true },
+    model: { value: '', writable: true },
+    turnSeen: { value: false, writable: true }
   });
   return state;
 }
@@ -351,7 +363,9 @@ function marker(state, time, kind, id, label) {
   const key = `${kind}:${typeof id === 'string' && id && id.length <= 160 ? shortName(id) : time}`;
   if (state.markers.has(key)) return;
   state.markers.add(key);
-  push(state, { id: key, time, kind, label, outcome: 'success' });
+  const event = { id: key, time, kind, label, outcome: 'success' };
+  Object.defineProperty(event, 'at', { value: { record: state.position, turn: state.turnAt, model: state.model } });
+  push(state, event);
 }
 
 function startTool(state, time, id, name, input) {
@@ -362,14 +376,18 @@ function startTool(state, time, id, name, input) {
     const files = fileTargets(name, input, state.cwd);
     if (files.length) Object.defineProperty(event, 'files', { value: files });
   }
+  // Host only: where the call is in the transcript, so its details can be read again on request (src/detail.js).
+  Object.defineProperty(event, 'at', { value: { call: state.position, result: -1, finished: 0, turn: state.turnAt, model: state.model } });
   state.calls.set(id, event);
   push(state, event);
   state.status = 'active';
 }
 
-function finishTool(state, id, failed) {
+function finishTool(state, id, failed, time) {
   const event = state.calls.get(id);
-  if (event) event.outcome = failed ? 'error' : 'success';
+  if (!event) return;
+  event.outcome = failed ? 'error' : 'success';
+  if (event.at) { event.at.result = state.position; if (Number.isFinite(time)) event.at.finished = time; }
 }
 
 function failedOutput(output) {
@@ -397,6 +415,7 @@ function applyRecord(state, record) {
     if (record.type === 'attachment') { if (record.attachment?.type === 'queued_command') taskNotice(state, time, record.attachment.prompt); return; }
     const content = Array.isArray(record.message?.content) ? record.message.content : [];
     if (record.type === 'assistant') {
+      if (typeof record.message?.model === 'string' && record.message.model.length <= 80) state.model = shortName(record.message.model);
       for (const part of content) if (part?.type === 'tool_use') { taskCall(state, part.id, part.name, part.input); startTool(state, time, part.id, part.name, part.input); }
       if (record.message?.stop_reason === 'end_turn') {
         state.status = 'complete';
@@ -405,7 +424,7 @@ function applyRecord(state, record) {
     } else if (record.type === 'user') {
       const results = content.filter(part => part?.type === 'tool_result');
       for (const part of results) {
-        finishTool(state, part.tool_use_id, part.is_error === true);
+        finishTool(state, part.tool_use_id, part.is_error === true, time);
         spawnResult(state, time, part, results.length === 1 ? record.toolUseResult : null);
         taskResult(state, time, part.tool_use_id, part.is_error === true, results.length === 1 ? record.toolUseResult : null);
       }
@@ -413,6 +432,7 @@ function applyRecord(state, record) {
       // An end report delivered as a user record is a lifecycle event, not something the user typed.
       if (taskNotice(state, time, text)) return;
       if ((typeof record.message?.content === 'string' || content.some(part => part?.type === 'text')) && !results.length) {
+        state.turnAt = state.position;
         marker(state, time, 'prompt', record.uuid, 'User prompt');
         state.status = 'active';
       }
@@ -429,6 +449,12 @@ function applyRecord(state, record) {
     if (typeof spawn?.parent_thread_id === 'string') state.parent = shortName(spawn.parent_thread_id);
     // Verified local shape (2026-11-12): a child rollout stores a short generated nickname and an optional role.
     state.agentLabel = sessionTitle(typeof spawn?.agent_role === 'string' && spawn.agent_role ? spawn.agent_role : spawn?.agent_nickname).slice(0, 40);
+    return;
+  }
+  // Verified local shape (2026-11-12): turn_context { turn_id, model, effort, ... } opens each turn. Only the model name is kept.
+  if (record.type === 'turn_context') {
+    if (typeof payload.model === 'string' && payload.model.length <= 80) state.model = shortName(payload.model);
+    if (!state.turnSeen) state.turnAt = state.position;
     return;
   }
   if (!validTime) return;
@@ -457,16 +483,19 @@ function applyRecord(state, record) {
       }
       startTool(state, time, payload.call_id, payload.name, input);
     } else if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output') {
-      finishTool(state, payload.call_id, failedOutput(payload.output));
+      finishTool(state, payload.call_id, failedOutput(payload.output), time);
       taskResult(state, time, payload.call_id, failedOutput(payload.output), null);
     }
     return;
   }
   if (record.type !== 'event_msg') return;
   if (payload.type === 'user_message') {
+    state.turnAt = state.position;
     marker(state, time, 'prompt', payload.id, 'User prompt');
     state.status = 'active';
   } else if (payload.type === 'task_started') {
+    state.turnAt = state.position;
+    state.turnSeen = true;
     state.turn = payload.turn_id || null;
     state.status = 'active';
     if (Number.isFinite(payload.model_context_window) && payload.model_context_window > 0) state.capacity = payload.model_context_window;

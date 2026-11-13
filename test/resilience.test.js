@@ -595,7 +595,8 @@ const SHAPE = {
   family: ['eventLimit', 'found', 'lanes', 'limit', 'notes'],
   lane: ['depth', 'duplicates', 'end', 'events', 'invalidLines', 'key', 'label', 'link', 'loading', 'missing', 'omitted', 'oversizedLines', 'parentKey', 'parentKnown', 'role', 'start', 'status', 'unreadable', 'updatedAt'],
   footprint: ['editCalls', 'edits', 'failedCalls', 'files', 'limit', 'readCalls', 'reads', 'total', 'unnamedEdits', 'unnamedReads'],
-  file: ['edits', 'failed', 'key', 'label', 'reads', 'shared'],
+  // events: the IDs of the calls behind the row (details on click), never their content.
+  file: ['edits', 'events', 'failed', 'key', 'label', 'reads', 'shared'],
   progress: ['items', 'omitted', 'source', 'unmatched', 'unread', 'unreadable', 'updatedAt'],
   item: ['id', 'label', 'status']
 };

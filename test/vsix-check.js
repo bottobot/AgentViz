@@ -12,7 +12,7 @@ const { createHash } = require('node:crypto');
 
 // The whole product. Anything else in the archive fails the check until it is listed here on purpose.
 const PRODUCT = ['extension/package.json', 'extension/readme.md', 'extension/media/app.js', 'extension/media/style.css', 'extension/media/view.js', 'extension/resources/agentviz.svg',
-  'extension/src/extension.js', 'extension/src/sessions.js', 'extension/src/transcript.js', 'extension/src/webview.js'];
+  'extension/src/detail.js', 'extension/src/extension.js', 'extension/src/sessions.js', 'extension/src/transcript.js', 'extension/src/webview.js'];
 // Written by the packaging tool itself.
 const ENVELOPE = ['[Content_Types].xml', 'extension.vsixmanifest'];
 

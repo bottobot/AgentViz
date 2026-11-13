@@ -45,6 +45,7 @@ The followed session never changes on its own. If a filter hides it, it stays fo
 - **File activity.** Reads and edits per file from structured file tools, twelve files ranked, with `EDITED 3+ TIMES` after three recorded edits. Labels are at most the last two path segments.
 - **Activity over time.** Thirty minutes, one bar per thirty seconds. Height is call volume, colour is the dominant kind, red ticks are tool errors, dots are prompts, turn ends and compactions.
 - **Context window.** Shown only when the source reports usage and capacity. Claude context is currently unavailable.
+- **Details on click.** Click a station (or its total), a Recent activity row, a lane name, a file or a bar. A panel on the right lists the calls behind it, newest first; choose one to read it from the transcript: the tool and its full input, its output, start, finish and duration, the model, the token counts, the prompt that started the turn and the agent's messages around it. Long texts are cut at 24,000 characters and the panel says by how much. Escape or Close shuts the panel and removes its text from the page.
 
 One counting rule applies everywhere: totals cover the followed session plus the subagent lanes shown, over loaded, retained history. Each call counts once, in the lane of the agent that made it. Starting a subagent counts in the parent's lane. The headings state the scope.
 
@@ -54,7 +55,7 @@ Quiet means no transcript records for thirty seconds. It is not a process health
 
 AgentViz reads the `projects` folder inside your local `.claude` directory and the `sessions` folder plus `session_index.jsonl` inside your local `.codex` directory. The machine settings `agentviz.claudeRoot` and `agentviz.codexRoot` point it at other configuration folders. No credentials, configuration files or environment variables are read.
 
-The view receives: opaque project keys with short labels, saved session names, session IDs, tool categories, safe tool names, file labels of at most two path segments, hostnames, a command's first word, task list labels, timestamps and outcomes. It does not receive prompts, reasoning, code, command arguments, tool output, file contents, patch bodies, full paths, or URL paths and queries.
+The view receives: opaque project keys with short labels, saved session names, session IDs, tool categories, safe tool names, file labels of at most two path segments, hostnames, a command's first word, task list labels, timestamps and outcomes. The live view does not receive prompts, reasoning, code, command arguments, tool output, file contents, patch bodies, full paths, or URL paths and queries. Those are read only when you open one call in the details panel: the host reads that call's records again from the transcript at the positions it noted (checking they still hold that call), sends them once, and keeps nothing. Encrypted reasoning is never read.
 
 Names, project labels, file labels and hostnames are still real. Treat screenshots of real sessions accordingly.
 

@@ -267,6 +267,19 @@ function openPanel(context) {
         void refresh(true);
       }
       else if (message.type === 'settings') void vscode.commands.executeCommand('agentviz.settings');
+      else if (message.type === 'detail') {
+        // Details on click (src/detail.js): one event of one lane of the followed session. Only a plain lane key and
+        // event ID are accepted; the transcript is the one this panel's reader already follows.
+        const requestId = Number.isSafeInteger(message.requestId) && message.requestId >= 0 ? message.requestId : -1;
+        const lane = typeof message.lane === 'string' && /^[\w-]{1,128}$/.test(message.lane) ? message.lane : '';
+        const id = typeof message.id === 'string' && /^[\w:.-]{1,160}$/.test(message.id) ? message.id : '';
+        if (requestId < 0) return;
+        const answer = detail => { if (!disposed) void current.webview.postMessage({ type: 'detail', requestId, detail }); };
+        if (!lane || !id) { answer({ ok: false, reason: 'invalid-argument' }); return; }
+        const asked = reader;
+        if (!asked || typeof asked.detail !== 'function') { answer({ ok: false, reason: 'not-found' }); return; }
+        asked.detail(lane, id).then(answer, () => answer({ ok: false, reason: 'source-unavailable' }));
+      }
       else if (message.type === 'select' && typeof message.id === 'string') {
         // Only an ID present in the current source can be followed, whether or not it was in the returned list.
         choose(index.get(message.id));

@@ -42,6 +42,9 @@
     state = { ...state, sessions, selectedId: sessions[0].id };
   }
   let shown = null;
+  // The session last drawn, and its markup, for the details panel and the redraw check.
+  let current = null;
+  let drawn = '';
   const send = message => { if (api) api.postMessage(message); };
   const request = () => ({ seq, workspaceKey: filters.workspaceKey, name: text(filters.name).trim(), id: text(filters.id).trim() });
   const whole = value => Number.isInteger(value) && value >= 0 ? value : 0;
@@ -177,7 +180,16 @@
     // A snapshot is drawn only under the session it was read from.
     const live = nav.selected && state.snapshot && state.snapshot.id === nav.selected.sessionId && state.snapshot.provider === nav.selected.provider ? state.snapshot : null;
     const session = example ? AgentViz.demoSession(now) : live;
-    content.innerHTML = AgentViz.render(session, { now, example, identity: identity || undefined, warnings: example ? [] : state.warnings });
+    current = session;
+    // The content is drawn again every second. A focused clickable item is found again by its data-open value, so
+    // keyboard focus survives the redraw.
+    const focused = document.activeElement && content.contains(document.activeElement) ? document.activeElement.getAttribute('data-open') : null;
+    const html = AgentViz.render(session, { now, example, identity: identity || undefined, warnings: example ? [] : state.warnings });
+    if (html !== drawn) {
+      content.innerHTML = html;
+      drawn = html;
+      if (focused) content.querySelector(`button[data-open="${CSS.escape(focused)}"]`)?.focus();
+    }
     exampleButton.textContent = example ? 'Return to live' : 'Show example';
     exampleButton.setAttribute('aria-pressed', String(example));
     setText(connection, example ? 'Example data only. Choose a session or return to live to follow real activity.' : !session && state.warnings.length ? state.warnings.join(' ') : '');
@@ -219,6 +231,7 @@
 
   window.addEventListener('message', event => {
     const data = event.data;
+    if (api && data?.type === 'detail') { showAnswer(data); return; }
     if (!api || data?.type !== 'state' || !Array.isArray(data.sessions)) return;
     // An answer to filters that have since changed is dropped whole, so an old list never appears under new filters.
     if (Number.isSafeInteger(data.queryRequestId) && data.queryRequestId >= 0) {
@@ -271,6 +284,7 @@
     if (api) example = false;
     remembered = listed().find(session => session.id === id) || null;
     state = { ...state, selectedId: id, selected: remembered, snapshot: null };
+    if (!drawer.hidden) closeDrawer();
     persist();
     send({ type: 'select', id });
     paint();
@@ -278,11 +292,162 @@
   copyButton.addEventListener('click', () => { void copyId(); });
   exampleButton.addEventListener('click', () => {
     example = !example;
+    if (!drawer.hidden) closeDrawer();
     persist();
     paint();
   });
   element('refresh').addEventListener('click', () => { send({ type: 'refresh' }); paint(); });
   element('settings').addEventListener('click', () => send({ type: 'settings' }));
+
+  // ---- Details on click ---------------------------------------------------------------------------------------
+  // A click on a station, a bar, a recent row, a lane or a file opens the panel on the calls it stands for. A click
+  // on one of those calls asks the host to read it from the transcript (src/detail.js). Everything shown here is
+  // written as text, never as markup.
+  const drawer = element('drawer');
+  const drawerTitle = element('drawer-title');
+  const drawerBody = element('drawer-body');
+  const drawerBack = element('drawer-back');
+  drawerTitle.tabIndex = -1;
+  const LIST_ROWS = 300;
+  let opener = null;
+  let listSpec = null;
+  let asking = 0;
+  let wanted = null;
+  const node = (tag, className, text) => { const made = document.createElement(tag); if (className) made.className = className; if (text !== undefined) made.textContent = text; return made; };
+  const at = time => Number.isFinite(time) && time > 0 ? new Date(time).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'not recorded';
+  const span = ms => !Number.isFinite(ms) || ms < 0 ? '' : ms < 1000 ? `${ms} ms` : ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)} min ${Math.round(ms % 60000 / 1000)} s`;
+  const count = value => Number.isFinite(value) ? value.toLocaleString() : null;
+  const outcomeName = value => ({ success: 'Succeeded', error: 'Error', running: 'Running' })[value] || String(value || '');
+  const kindName = { files: 'Files', edits: 'Edits', shell: 'Shell', network: 'Network', agents: 'Agents', memory: 'Memory', other: 'Other', prompt: 'Prompt', handoff: 'Task received', complete: 'Turn complete', paused: 'Turn paused', compaction: 'Compaction' };
+
+  function openDrawer(title) {
+    drawer.hidden = false;
+    drawerTitle.textContent = title;
+    drawerBody.replaceChildren();
+    document.body.classList.add('drawer-open');
+  }
+  function closeDrawer() {
+    drawer.hidden = true;
+    // What was shown leaves the page with the panel: transcript text is never kept in a hidden part of the page.
+    drawerBody.replaceChildren();
+    drawerTitle.textContent = '';
+    document.body.classList.remove('drawer-open');
+    listSpec = null;
+    wanted = null;
+    const back = opener && content.querySelector(`button[data-open="${CSS.escape(opener)}"]`);
+    if (back) back.focus();
+  }
+
+  function facts(rows) {
+    const list = node('dl', 'detail-facts');
+    for (const [key, value] of rows) {
+      if (value === null || value === undefined || value === '') continue;
+      list.append(node('dt', '', key), node('dd', '', String(value)));
+    }
+    return list;
+  }
+  function block(title, text, more) {
+    const section = node('section', 'detail-block');
+    section.append(node('h3', '', title));
+    const pre = node('pre', 'detail-text', text);
+    pre.tabIndex = 0;
+    section.append(pre);
+    if (more > 0) section.append(node('p', 'muted', `${more.toLocaleString()} more characters not shown.`));
+    return section;
+  }
+
+  function showList(spec) {
+    if (!current) return;
+    const found = AgentViz.eventsFor(current, spec, Date.now());
+    listSpec = spec;
+    wanted = null;
+    drawerBack.hidden = true;
+    openDrawer(found.title);
+    if (found.facts) drawerBody.append(node('p', 'detail-note', found.facts.join(' · ')));
+    const total = found.events.length;
+    drawerBody.append(node('p', 'muted', total ? `${total} ${total === 1 ? 'event' : 'events'}, newest first.${total > LIST_ROWS ? ` The newest ${LIST_ROWS} are listed.` : ''} Choose one for its full details.` : 'No recorded events here.'));
+    const list = node('ol', 'detail-list');
+    for (const item of found.events.slice(0, LIST_ROWS)) {
+      const row = node('li');
+      const button = node('button', `detail-row ${item.kind}`);
+      button.type = 'button';
+      button.append(node('span', 'event-dot' + (item.outcome === 'error' ? ' failed' : '')), node('span', 'event-label', item.label), node('span', 'event-outcome', item.outcome === 'error' ? 'Error' : item.outcome === 'running' ? 'Running' : ''), node('time', '', new Date(item.time).toLocaleTimeString()));
+      button.addEventListener('click', () => showEvent(item));
+      row.append(button);
+      list.append(row);
+    }
+    drawerBody.append(list);
+    drawerTitle.focus();
+  }
+
+  function showEvent(item) {
+    drawerBack.hidden = !listSpec;
+    openDrawer(item.label);
+    drawerBody.append(facts([['Kind', kindName[item.kind] || item.kind], ['Lane', item.laneName], ['Time', at(item.time)], ['Outcome', outcomeName(item.outcome)]]));
+    drawerTitle.focus();
+    if (example || !api) { drawerBody.append(node('p', 'muted', 'Example data: there is no transcript behind it, so there is nothing more to read.')); return; }
+    const status = node('p', 'muted', 'Reading the transcript…');
+    status.setAttribute('role', 'status');
+    drawerBody.append(status);
+    wanted = { requestId: ++asking, item };
+    send({ type: 'detail', requestId: asking, lane: item.lane || 'main', id: item.id });
+  }
+
+  function showAnswer(data) {
+    if (!wanted || data.requestId !== wanted.requestId || drawer.hidden) return;
+    const item = wanted.item;
+    const detail = data.detail && typeof data.detail === 'object' ? data.detail : { ok: false, reason: 'unknown' };
+    wanted = null;
+    drawerBody.replaceChildren();
+    const word = { 'not-found': 'This event is no longer in the followed transcript. Press Refresh and try again.', 'source-unavailable': 'The transcript could not be read.', 'invalid-argument': 'This event cannot be looked up.' };
+    if (!detail.ok) { drawerBody.append(facts([['Kind', kindName[item.kind] || item.kind], ['Lane', item.laneName], ['Time', at(item.time)]]), node('p', 'notice', word[detail.reason] || 'The details could not be read.')); return; }
+    const text = value => typeof value === 'string' ? value : '';
+    const started = Number.isFinite(detail.time) ? detail.time : item.time;
+    const finished = Number.isFinite(detail.finished) ? detail.finished : null;
+    drawerBody.append(facts([
+      ['Tool', text(detail.tool)], ['Kind', kindName[item.kind] || item.kind], ['Lane', item.laneName],
+      ['Outcome', detail.failed ? 'Error' : outcomeName(item.outcome)], ['Started', at(started)],
+      ['Finished', finished ? at(finished) : ''], ['Took', finished ? span(finished - started) : ''], ['Model', text(detail.model)],
+      ['Provider', detail.provider === 'claude' ? 'Claude Code' : detail.provider === 'codex' ? 'Codex' : ''], ['Call ID', text(detail.id)]
+    ]));
+    for (const note of Array.isArray(detail.notes) ? detail.notes : []) if (typeof note === 'string') drawerBody.append(node('p', 'detail-note', note));
+    if (text(detail.input)) drawerBody.append(block('Input', detail.input, detail.inputMore));
+    if (text(detail.output)) drawerBody.append(block(detail.failed ? 'Output (error)' : 'Output', detail.output, detail.outputMore));
+    const tokens = detail.tokens && typeof detail.tokens === 'object' ? detail.tokens : null;
+    if (tokens) {
+      const section = node('section', 'detail-block');
+      section.append(node('h3', '', 'Tokens'));
+      section.append(facts([['Input', count(tokens.input)], ['Cached input read', count(tokens.cacheRead)], ['Cache written', count(tokens.cacheWrite)], ['Output', count(tokens.output)],
+        ['Reasoning', count(tokens.reasoning)], ['Context in use', count(tokens.context)], ['Context window', count(tokens.window)], ['Session total', count(tokens.sessionTotal)]]));
+      section.append(node('p', 'muted', detail.provider === 'claude' ? 'From the model call that made this tool call.' : 'From the token report nearest this event in its turn.'));
+      drawerBody.append(section);
+    }
+    if (detail.prompt && text(detail.prompt.text)) drawerBody.append(block(`Prompt that started this turn${Number.isFinite(detail.prompt.time) ? ` · ${at(detail.prompt.time)}` : ''}`, detail.prompt.text, detail.prompt.more));
+    const messages = Array.isArray(detail.messages) ? detail.messages.filter(message => message && typeof message.text === 'string') : [];
+    if (messages.length) {
+      const section = node('section', 'detail-block');
+      section.append(node('h3', '', 'Agent messages in this turn'));
+      for (const message of messages) {
+        section.append(node('p', 'detail-when', `${message.when === 'before' ? 'Before' : 'After'} this event${Number.isFinite(message.time) ? ` · ${at(message.time)}` : ''}`));
+        const pre = node('pre', 'detail-text', message.text);
+        pre.tabIndex = 0;
+        section.append(pre);
+        if (message.more > 0) section.append(node('p', 'muted', `${message.more.toLocaleString()} more characters not shown.`));
+      }
+      if (detail.messagesMore > 0) section.append(node('p', 'muted', `${detail.messagesMore} more messages in this turn are not shown.`));
+      drawerBody.append(section);
+    }
+  }
+
+  content.addEventListener('click', event => {
+    const target = event.target && typeof event.target.closest === 'function' ? event.target.closest('[data-open]') : null;
+    if (!target || !content.contains(target)) return;
+    opener = target.getAttribute('data-open');
+    showList(opener);
+  });
+  element('drawer-close').addEventListener('click', closeDrawer);
+  drawerBack.addEventListener('click', () => { if (listSpec) showList(listSpec); });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && !drawer.hidden && event.target?.tagName !== 'INPUT') { event.preventDefault(); closeDrawer(); } });
   paint();
   send({ type: 'ready', query: request() });
 })();

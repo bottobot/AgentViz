@@ -41,6 +41,7 @@ function host(discoverSessions, workspaceFolders, savedSelection, family, { open
     if (name === './sessions') return { discoverSessions, FamilyReader: class {
       constructor(provider, id) { readers.push(id); }
       async read(file, context) { reads.push(file); contexts.push(context); return family ? family(file, context) : createSession('claude', 'synthetic'); }
+      async detail(lane, id) { return { ok: true, lane, id }; }
     } };
     if (name === './webview') return require('../src/webview');
     if (name === './transcript') return require('../src/transcript');
@@ -71,6 +72,26 @@ test('the sidebar view opens the activity tab when shown, and Settings opens Age
   await instance.callbacks['agentviz.settings']();
   instance.callbacks.message({ type: 'settings' });
   assert.deepEqual(instance.executed, [['workbench.action.openSettings', '@ext:agentviz-local.agent-viz'], ['agentviz.settings']]);
+  instance.callbacks.dispose();
+});
+
+// Details on click: the panel asks about one event; only a plain lane key and event ID reach the reader.
+test('a detail request is answered by the followed session\'s reader under its own number; malformed ones are refused', async () => {
+  const instance = host(() => Promise.resolve(catalog('root')));
+  instance.callbacks.message({ type: 'ready' });
+  await flush();
+  const answers = () => instance.messages.filter(message => message.type === 'detail');
+  instance.callbacks.message({ type: 'detail', requestId: 4, lane: 'main', id: 'toolu_1' });
+  await flush();
+  assert.equal(JSON.stringify(answers().at(-1)), JSON.stringify({ type: 'detail', requestId: 4, detail: { ok: true, lane: 'main', id: 'toolu_1' } }));
+  instance.callbacks.message({ type: 'detail', requestId: 5, lane: '../x', id: 'toolu_1' });
+  instance.callbacks.message({ type: 'detail', requestId: 6, lane: 'main', id: 'a b' });
+  await flush();
+  assert.deepEqual(answers().slice(-2).map(message => [message.requestId, message.detail.reason]), [[5, 'invalid-argument'], [6, 'invalid-argument']]);
+  const before = answers().length;
+  instance.callbacks.message({ type: 'detail', lane: 'main', id: 'toolu_1' });
+  await flush();
+  assert.equal(answers().length, before, 'no request number, no answer');
   instance.callbacks.dispose();
 });
 

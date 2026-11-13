@@ -16,7 +16,10 @@ const body = markup.slice(markup.indexOf('<body>'));
 function boot({ host = true, saved, clipboard = 'ok', answer = true, post } = {}) {
   const document = { activeElement: null, selected: null };
   class Element {
-    constructor(tag, id = '') { Object.assign(this, { tagName: tag, id, children: [], listeners: {}, attributes: {}, stored: '', text: '', disabled: false, hidden: false, innerHTML: '', valueWrites: 0, rebuilds: 0 }); }
+    constructor(tag, id = '') { Object.assign(this, { tagName: tag, id, children: [], listeners: {}, attributes: {}, stored: '', text: '', disabled: false, hidden: false, innerHTML: '', valueWrites: 0, rebuilds: 0, classList: { add() {}, remove() {} } }); }
+    // The details panel (details on click) asks these; the stand-in holds no rendered content to search.
+    contains() { return false; }
+    querySelector() { return null; }
     get textContent() { return this.text; }
     set textContent(value) { this.text = String(value); }
     get value() {
@@ -44,13 +47,15 @@ function boot({ host = true, saved, clipboard = 'ok', answer = true, post } = {}
   }
   document.getElementById = id => elements[id] || null;
   document.createElement = tag => new Element(tag);
+  document.body = new Element('body');
+  document.addEventListener = (type, listener) => { (document.listeners ||= {})[type] = listener; };
   document.execCommand = command => { document.executed = command; return clipboard === 'fallback'; };
   const posted = [];
   const states = [];
   const copied = [];
   const windowListeners = {};
   const sandbox = {
-    document, AgentViz: view, console,
+    document, AgentViz: view, console, CSS: { escape: value => String(value) },
     setTimeout: () => 0, clearTimeout: () => {},
     window: {
       addEventListener: (type, listener) => { windowListeners[type] = listener; },

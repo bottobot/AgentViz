@@ -27,6 +27,7 @@ function webviewHtml({ css, view, app, cspSource }) {
 <span id="copy-status" class="selection-detail" role="status" aria-live="polite"></span>
 <span id="selection-note" class="selection-note" role="status" aria-live="polite"></span>
 </section><div id="connection" class="toolbar-note" role="status" aria-live="polite"></div><main id="content" aria-label="Session activity"></main>
+<aside id="drawer" class="drawer" aria-labelledby="drawer-title" hidden><div class="drawer-head"><button id="drawer-back" type="button" hidden>Back</button><h2 id="drawer-title"></h2><button id="drawer-close" type="button" aria-label="Close details">Close</button></div><div id="drawer-body" class="drawer-body"></div></aside>
 <script nonce="${nonce}" src="${attribute(view)}"></script><script nonce="${nonce}" src="${attribute(app)}"></script></body></html>`;
 }
 

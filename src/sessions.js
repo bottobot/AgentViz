@@ -5,6 +5,7 @@ const path = require('node:path');
 const { StringDecoder } = require('node:string_decoder');
 const { createHash } = require('node:crypto');
 const { createSession, applyRecord, projectName, sessionTitle, workspaceIdentity, UNNAMED_SESSION } = require('./transcript');
+const { readDetail } = require('./detail');
 
 // WARNING: these are disclosed history/list limits, not claims of complete coverage.
 const SESSION_LIMIT = 80;
@@ -45,6 +46,9 @@ class TranscriptReader {
   reset() {
     this.state = createSession(this.provider, this.id);
     this.offset = 0;
+    // Byte position where `tail` starts: every record is applied with its own position, so a later click can read
+    // that one line again (src/detail.js checks what it finds there before using it).
+    this.lineStart = 0;
     this.tail = '';
     this.decoder = new StringDecoder('utf8');
     this.skipping = false;
@@ -56,8 +60,11 @@ class TranscriptReader {
     const lines = (this.tail + text).split('\n');
     this.tail = lines.pop();
     for (const line of lines) {
+      const position = this.lineStart;
+      const bytes = Buffer.byteLength(line, 'utf8');
+      this.lineStart += bytes + 1;
       if (this.skipping) { this.skipping = false; continue; }
-      if (Buffer.byteLength(line, 'utf8') > MAX_LINE) { this.state.oversizedLines++; continue; }
+      if (bytes > MAX_LINE) { this.state.oversizedLines++; continue; }
       if (!line.trim()) continue;
       let record;
       try { record = JSON.parse(line); } catch { this.state.invalidLines++; continue; }
@@ -70,10 +77,12 @@ class TranscriptReader {
         // session metadata) is still read.
         record = { ...record, timestamp: undefined };
       }
+      this.state.position = position;
       try { applyRecord(this.state, record); } catch { this.state.invalidLines++; }
     }
     if (Buffer.byteLength(this.tail, 'utf8') > MAX_LINE) {
       if (!this.skipping) this.state.oversizedLines++;
+      this.lineStart += Buffer.byteLength(this.tail, 'utf8');
       this.tail = '';
       this.skipping = true;
     }
@@ -270,6 +279,8 @@ class FamilyReader {
     });
     const byKey = new Map(kept.map(member => [member.key, member]));
     const stateOf = key => key === ROOT_LANE ? main : this.children.get(byKey.get(key).file).state;
+    // Host only (details on click): which transcript and state each lane the view was sent came from.
+    this.sources = new Map([[ROOT_LANE, { file, state: main }], ...kept.map(member => [member.key, { file: member.file, state: this.children.get(member.file).state }])]);
     const lanes = new Map();
     for (const member of kept) {
       const child = this.children.get(member.file);
@@ -333,6 +344,18 @@ class FamilyReader {
     if (missing) notes.push(`${missing} subagent${missing === 1 ? '' : 's'} recorded by a parent ${missing === 1 ? 'has' : 'have'} no transcript in the source folders.`);
     if (foreign) notes.push(`${foreign} transcript${foreign === 1 ? '' : 's'} in the subagent folder name${foreign === 1 ? 's' : ''} another session and ${foreign === 1 ? 'is' : 'are'} not shown.`);
     return { ...main, loading: main.loading === true || ordered.some(lane => lane.loading), family: { lanes: ordered, found: plan.found, limit: FAMILY_LIMIT, eventLimit: LANE_EVENTS, notes } };
+  }
+
+  // Details on click: one event of one lane the last read sent, read again from its transcript. The lane key and
+  // event ID come from the view and are only looked up here; the file always comes from this reader's own listing.
+  async detail(lane, id) {
+    const source = this.sources?.get(lane);
+    if (!source?.state) return { ok: false, reason: 'not-found' };
+    const state = source.state;
+    let event = state.calls.get(id);
+    for (let index = state.events.length - 1; !event && index >= 0; index--) if (state.events[index].id === id) event = state.events[index];
+    if (!event) return { ok: false, reason: 'not-found' };
+    return readDetail(this.provider, source.file, event);
   }
 }
 

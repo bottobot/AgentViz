@@ -356,7 +356,10 @@ exports.run = async function () {
       await check('webview: accessible names', async () => {
         await followById(CLAUDE_ID, ids.claude);
         const names = await view.run(probes.call(probes.nameReport));
-        assert.deepEqual(Object.fromEntries(names.controls.map(control => [control.id, control.name])), { refresh: 'Refresh', settings: 'Settings', example: 'Show example', workspace: 'Project / workspace', 'name-filter': 'Session name',
+        // The activity's clickable items (details on click) carry no id; each must still have a name.
+        const items = names.controls.filter(control => !control.id);
+        assert.ok(items.length > 0 && items.every(control => control.name), `Every clickable item has a name: ${JSON.stringify(items.slice(0, 5))}`);
+        assert.deepEqual(Object.fromEntries(names.controls.filter(control => control.id).map(control => [control.id, control.name])), { refresh: 'Refresh', settings: 'Settings', example: 'Show example', workspace: 'Project / workspace', 'name-filter': 'Session name',
           'id-filter': 'Session ID (optional)', 'clear-filters': 'Clear filters', session: 'Session', 'copy-id': 'Copy full session ID' });
         assert.deepEqual(names.landmarks.map(landmark => landmark.name), ['Session controls', 'Find a session', 'Followed session', 'Session activity']);
         assert.ok(names.images.length >= 3 && names.images.every(Boolean), `Every graphic has a name: ${JSON.stringify(names.images)}`);

@@ -55,7 +55,7 @@ test('repeated reads and edits are counted per file, ranked, and marked after th
   assert.deepEqual(footprint.files.map(file => [file.label, file.reads, file.edits]), [['src/hot.js', 2, 3], ['src/warm.js', 0, 2], ['nb/plot.ipynb', 0, 1], ['docs/cold.md', 4, 0]]);
   assert.deepEqual([footprint.total, footprint.readCalls, footprint.editCalls, footprint.unnamedReads, footprint.unnamedEdits], [4, 6, 6, 0, 0]);
   for (const file of footprint.files) {
-    assert.deepEqual(Object.keys(file).sort(), ['edits', 'failed', 'key', 'label', 'reads', 'shared']);
+    assert.deepEqual(Object.keys(file).sort(), ['edits', 'events', 'failed', 'key', 'label', 'reads', 'shared']);
     assert.match(file.key, /^f:[0-9a-f]{20}$/);
   }
   assertAgrees(state);

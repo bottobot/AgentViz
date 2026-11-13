@@ -163,7 +163,7 @@ async function main() {
 
     await check('keyboard: filter, choose, copy, Escape, Clear and the example switch without a pointer', async () => {
       await followClaude();
-      await page.evaluate('document.activeElement && document.activeElement.blur()');
+      await page.evaluate('document.getElementById("refresh").focus()');
       await tabTo('name-filter');
       await page.type('  CHECKOUT fix ');
       const named = await until(view => /^2 of \d+ sessions match\./.test(view.matches), 'two sessions with the same saved name');
@@ -233,7 +233,11 @@ async function main() {
       const { nodes } = await page.send('Accessibility.getFullAXTree');
       const named = nodes.filter(node => !node.ignored && node.role).map(node => ({ role: node.role.value, name: node.name ? String(node.name.value || '') : '' }));
       const of = (...roles) => named.filter(node => roles.includes(node.role)).map(node => node.name).sort();
-      same(of('button'), ['Clear filters', 'Copy full session ID', 'Refresh', 'Settings', 'Show example'], 'Buttons');
+      // The toolbar's own buttons, plus the clickable items of the activity (details on click), each with a name.
+      const buttons = of('button');
+      for (const name of ['Clear filters', 'Copy full session ID', 'Refresh', 'Settings', 'Show example']) assert(buttons.includes(name), `Button ${name}: ${JSON.stringify(buttons)}`);
+      assert(buttons.every(Boolean), `Every button has a name: ${JSON.stringify(buttons)}`);
+      assert(buttons.some(name => /^Files: \d+ calls?\. Show them$/.test(name)) && buttons.some(name => /^Show details: /.test(name)), `Stations and recent rows are named buttons: ${JSON.stringify(buttons)}`);
       same(of('combobox', 'ComboBoxSelect', 'MenuListPopup').filter(Boolean).filter((name, index, all) => all.indexOf(name) === index), ['Project / workspace', 'Session'], 'Lists');
       same(of('searchbox', 'textbox'), ['Session ID (optional)', 'Session name'], 'Search fields');
       same(of('navigation', 'search', 'main'), ['Find a session', 'Session activity', 'Session controls'], 'Landmarks');
@@ -242,6 +246,30 @@ async function main() {
       const page_ = await page.evaluate(probes.call(probes.nameReport));
       same([page_.lang, page_.title, page_.unnamedGraphics, page_.headings.filter(tag => tag === 'h1').length], ['en', 'AgentViz', 0, 1], 'Language, title, unnamed graphics, main headings');
       measurements.accessibleNames = { buttons: of('button'), lists: of('combobox', 'ComboBoxSelect'), fields: of('searchbox', 'textbox'), landmarks: of('navigation', 'search', 'main'), graphics: graphics.length };
+    });
+
+    // Details on click, end to end with the real host: a station lists its calls, a call is read from the
+    // transcript, and Escape closes the panel, empties it and gives focus back to the station.
+    await check('details on click: a station lists its calls and a call shows what the transcript recorded', async () => {
+      await followClaude();
+      await page.evaluate(`[...document.querySelectorAll('.station-totals button')].find(button => /^Files/.test(button.textContent)).click()`);
+      const list = await page.evaluate(`({ hidden: document.getElementById('drawer').hidden, title: document.getElementById('drawer-title').textContent, rows: document.querySelectorAll('#drawer-body .detail-row').length, focus: document.activeElement && document.activeElement.id })`);
+      assert(!list.hidden && list.title === 'Files calls' && list.rows > 0 && list.focus === 'drawer-title', `The Files list opens with focus on its title: ${JSON.stringify(list)}`);
+      await page.evaluate(`document.querySelector('#drawer-body .detail-row').click()`);
+      let shown;
+      for (let n = 0; n < 120; n++) {
+        await pump();
+        shown = await page.evaluate(`({ headings: [...document.querySelectorAll('#drawer-body h3')].map(heading => heading.textContent), facts: [...document.querySelectorAll('#drawer-body dt')].map(term => term.textContent), reading: /Reading the transcript/.test(document.getElementById('drawer-body').textContent), back: !document.getElementById('drawer-back').hidden })`);
+        if (!shown.reading) break;
+        await sleep(60);
+      }
+      assert(!shown.reading && shown.headings.includes('Input') && shown.facts.includes('Tool') && shown.back, `The call is read from the transcript: ${JSON.stringify(shown)}`);
+      await contrast('details open, 1280 px');
+      await layout('details open, 1280 px');
+      await shot('details-1280.png');
+      await page.key('Escape');
+      const closed = await page.evaluate(`({ hidden: document.getElementById('drawer').hidden, empty: !document.getElementById('drawer-body').childNodes.length, focus: document.activeElement && document.activeElement.getAttribute('data-open') })`);
+      same(closed, { hidden: true, empty: true, focus: 'station:files' }, 'Escape closes and empties the panel and returns focus');
     });
 
     await check('contrast of the live view', async () => {
@@ -256,19 +284,19 @@ async function main() {
         await size(width, 800);
         await layout(`live, ${width} px`);
         await contrast(`live, ${width} px`);
-        await page.evaluate('document.activeElement && document.activeElement.blur(); window.scrollTo(0, 0)');
+        // The activity below the toolbar holds many clickable items (details on click), so the walk starts at the
+        // first control by the keyboard (Shift+Tab from the second) and reads the eight toolbar controls in order.
+        await page.evaluate('window.scrollTo(0, 0); document.getElementById("settings").focus()');
+        await page.key('Tab', { shift: true });
         const seen = [];
-        // Tab carries on from the control used last and passes through the browser's own frame once per round,
-        // so the walk goes one full round and is then read from the first control.
-        for (let n = 0; n < 16 && seen.length < 8; n++) {
-          await page.key('Tab');
+        for (let n = 0; n < 8; n++) {
+          if (n) await page.key('Tab');
           const ring = await page.evaluate(probes.call(probes.focusReport));
-          if (!ring) continue;
+          if (!ring) { seen.push(''); continue; }
           assert(ring.outlineStyle !== 'none' && ring.devicePixels >= 2 && ring.inView, `A focus ring inside the ${width} px viewport: ${JSON.stringify(ring)}`);
           seen.push(ring.id);
         }
-        const start = seen.indexOf('refresh');
-        same([...seen.slice(start), ...seen.slice(0, start)], ['refresh', 'settings', 'example', 'workspace', 'name-filter', 'id-filter', 'session', 'copy-id'], `Tab order at ${width} px`);
+        same(seen, ['refresh', 'settings', 'example', 'workspace', 'name-filter', 'id-filter', 'session', 'copy-id'], `Tab order at ${width} px`);
         await page.evaluate('document.activeElement.blur(); window.scrollTo(0, 0)');
         await shot(`live-${width}.png`);
       }
@@ -311,8 +339,8 @@ async function main() {
     for (let attempt = 0; attempt < 10; attempt++) { try { fs.rmSync(run, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); break; } catch { await sleep(500); } }
   }
   const failed = checks.filter(entry => !entry.pass);
-  const passed = !failure && failed.length === 0 && checks.length === 11;
-  receipt({ passed, problems: [failure, checks.length !== 11 && !failure ? `Only ${checks.length} of 11 checks ran.` : null].filter(Boolean), checks, measurements, syntheticSources: true,
+  const passed = !failure && failed.length === 0 && checks.length === 12;
+  receipt({ passed, problems: [failure, checks.length !== 12 && !failure ? `Only ${checks.length} of 12 checks ran.` : null].filter(Boolean), checks, measurements, syntheticSources: true,
     screenshots: fs.readdirSync(OUT).filter(name => name.endsWith('.png')).sort() });
   console.log(`${passed ? 'PASSED' : 'FAILED'}: ${measurements.browser || 'browser'}, ${checks.length - failed.length} of ${checks.length} checks. Receipt: ${receiptFile}`);
   return passed ? 0 : 1;
