@@ -11,7 +11,7 @@ const { readArchive, judge, staleFiles, PRODUCT, ENVELOPE } = require('./vsix-ch
 
 const root = path.join(__dirname, '..');
 const vsce = path.join(root, 'node_modules', '@vscode', 'vsce', 'vsce');
-const ALLOWED = ['!package.json', '!README.md', '!src/*.js', '!media/app.js', '!media/view.js', '!media/style.css'];
+const ALLOWED = ['!package.json', '!README.md', '!src/*.js', '!media/app.js', '!media/view.js', '!media/style.css', '!resources/agentviz.svg'];
 
 test('.vscodeignore ignores everything first and then allows only the product files', () => {
   const rules = fs.readFileSync(path.join(root, '.vscodeignore'), 'utf8').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#'));
@@ -70,7 +70,7 @@ test('a package built beside transcripts, settings, evidence and orchestration f
   const folder = fs.mkdtempSync(path.join(os.tmpdir(), 'agentviz-package-'));
   try {
     for (const name of ['package.json', 'README.md', '.vscodeignore']) fs.copyFileSync(path.join(root, name), path.join(folder, name));
-    for (const dir of ['src', 'media']) fs.cpSync(path.join(root, dir), path.join(folder, dir), { recursive: true });
+    for (const dir of ['src', 'media', 'resources']) fs.cpSync(path.join(root, dir), path.join(folder, dir), { recursive: true });
     // Synthetic stand-ins for what a working checkout collects. None of these may reach the package.
     const strays = ['.claude/settings.local.json', '.claude/retrospective/library/invariants.yaml', '.env', 'notes.md', 'session-copy.jsonl', 'src/captured-transcript.jsonl',
       'src/notes.md', 'media/screenshot.png', 'media/extra.js', 'artifacts/host/extension-host-result.json', '.agentboard/tasks.json', 'test/extension.test.js', 'docs/development/agentviz-next-run.md',

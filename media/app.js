@@ -282,6 +282,7 @@
     paint();
   });
   element('refresh').addEventListener('click', () => { send({ type: 'refresh' }); paint(); });
+  element('settings').addEventListener('click', () => send({ type: 'settings' }));
   paint();
   send({ type: 'ready', query: request() });
 })();

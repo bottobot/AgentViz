@@ -14,7 +14,7 @@ During development:
 
 1. Open this workspace in VS Code.
 2. Press F5 and select **Run AgentViz**. This opens an Extension Development Host.
-3. In that window, run **AgentViz: Open Activity** from the Command Palette.
+3. In that window, click the AgentViz icon in the activity bar, or run **AgentViz: Open Activity** from the Command Palette. The gear in the AgentViz sidebar, and **Settings** in the tab, open AgentViz's settings (the Claude and Codex folders it reads).
 4. Choose a project, type part of a name or an ID, then pick a session. **Show example** shows the synthetic example.
 
 From a package: run `npm ci --ignore-scripts`, `npm run package`, then **Extensions: Install from VSIX** and choose `agent-viz-0.1.0.vsix`. The package uses a local publisher identifier (`agentviz-local`). Installing it is your decision; no check here installs it.

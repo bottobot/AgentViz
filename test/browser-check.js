@@ -146,14 +146,14 @@ async function main() {
       await page.evaluate('document.activeElement && document.activeElement.blur()');
       const order = [];
       const rings = [];
-      for (let n = 0; n < 7; n++) {
+      for (let n = 0; n < 8; n++) {
         await page.key('Tab');
         const ring = await page.evaluate(probes.call(probes.focusReport));
         order.push(ring ? ring.id : '');
         if (ring) rings.push(ring);
       }
       // Clear filters is disabled with no filter set, so Tab passes it.
-      same(order, ['refresh', 'example', 'workspace', 'name-filter', 'id-filter', 'session', 'copy-id'], 'Tab order');
+      same(order, ['refresh', 'settings', 'example', 'workspace', 'name-filter', 'id-filter', 'session', 'copy-id'], 'Tab order');
       for (const ring of rings) assert(ring.outlineStyle !== 'none' && ring.devicePixels >= 2 && ring.ratio >= 3 && ring.inView, `A visible focus ring on ${ring.id}: ${JSON.stringify(ring)}`);
       measurements.focusRings = rings.map(ring => `${ring.id}: ${ring.devicePixels} device px ${ring.outlineStyle}, ${ring.ratio}:1`);
       // Shift+Tab goes back the same way.
@@ -233,7 +233,7 @@ async function main() {
       const { nodes } = await page.send('Accessibility.getFullAXTree');
       const named = nodes.filter(node => !node.ignored && node.role).map(node => ({ role: node.role.value, name: node.name ? String(node.name.value || '') : '' }));
       const of = (...roles) => named.filter(node => roles.includes(node.role)).map(node => node.name).sort();
-      same(of('button'), ['Clear filters', 'Copy full session ID', 'Refresh', 'Show example'], 'Buttons');
+      same(of('button'), ['Clear filters', 'Copy full session ID', 'Refresh', 'Settings', 'Show example'], 'Buttons');
       same(of('combobox', 'ComboBoxSelect', 'MenuListPopup').filter(Boolean).filter((name, index, all) => all.indexOf(name) === index), ['Project / workspace', 'Session'], 'Lists');
       same(of('searchbox', 'textbox'), ['Session ID (optional)', 'Session name'], 'Search fields');
       same(of('navigation', 'search', 'main'), ['Find a session', 'Session activity', 'Session controls'], 'Landmarks');
@@ -260,7 +260,7 @@ async function main() {
         const seen = [];
         // Tab carries on from the control used last and passes through the browser's own frame once per round,
         // so the walk goes one full round and is then read from the first control.
-        for (let n = 0; n < 16 && seen.length < 7; n++) {
+        for (let n = 0; n < 16 && seen.length < 8; n++) {
           await page.key('Tab');
           const ring = await page.evaluate(probes.call(probes.focusReport));
           if (!ring) continue;
@@ -268,7 +268,7 @@ async function main() {
           seen.push(ring.id);
         }
         const start = seen.indexOf('refresh');
-        same([...seen.slice(start), ...seen.slice(0, start)], ['refresh', 'example', 'workspace', 'name-filter', 'id-filter', 'session', 'copy-id'], `Tab order at ${width} px`);
+        same([...seen.slice(start), ...seen.slice(0, start)], ['refresh', 'settings', 'example', 'workspace', 'name-filter', 'id-filter', 'session', 'copy-id'], `Tab order at ${width} px`);
         await page.evaluate('document.activeElement.blur(); window.scrollTo(0, 0)');
         await shot(`live-${width}.png`);
       }

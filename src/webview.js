@@ -11,7 +11,7 @@ function webviewHtml({ css, view, app, cspSource }) {
 <title>AgentViz</title><link rel="stylesheet" href="${attribute(css)}"></head>
 <body><nav class="toolbar" aria-label="Session controls">
 <div class="brand"><span class="brand-mark" aria-hidden="true">◎</span>AgentViz</div>
-<div class="spacer"></div><button id="refresh" type="button">Refresh</button><button id="example" type="button">Show example</button>
+<div class="spacer"></div><button id="refresh" type="button">Refresh</button><button id="settings" type="button">Settings</button><button id="example" type="button">Show example</button>
 </nav><section class="finder" role="search" aria-label="Find a session">
 <div class="field"><label class="field-label" for="workspace">Project / workspace</label><select id="workspace"><option value="">All projects</option></select></div>
 <div class="field"><label class="field-label" for="name-filter">Session name</label><input id="name-filter" type="search" autocomplete="off" spellcheck="false" maxlength="200" placeholder="Any name"></div>

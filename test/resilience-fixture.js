@@ -84,7 +84,7 @@ function realHost({ claudeRoot, codexRoot, sessions = require('../src/sessions')
   };
   const vscode = {
     commands: { registerCommand: (name, callback) => { callbacks[name] = callback; return disposable(); } },
-    window: { createWebviewPanel: (type, title, column, options) => { created.push(options); return newPanel(options); }, showErrorMessage: message => { errors.push(message); } },
+    window: { createWebviewPanel: (type, title, column, options) => { created.push(options); return newPanel(options); }, createTreeView: () => ({ visible: false, onDidChangeVisibility: () => disposable(), dispose() {} }), showErrorMessage: message => { errors.push(message); } },
     workspace: {
       workspaceFolders: [],
       getConfiguration: () => ({ get: key => roots[key] }),

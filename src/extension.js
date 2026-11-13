@@ -114,6 +114,13 @@ function activate(context) {
   // The Command Palette command takes no argument; anything passed to it is ignored.
   context.subscriptions.push(vscode.commands.registerCommand('agentviz.open', () => openPanel(context)));
   context.subscriptions.push(vscode.commands.registerCommand('agentviz.openSession', argument => openSession(context, argument)));
+  // The gear in the sidebar view, the welcome link and the panel's Settings button: the Settings editor on AgentViz's own settings.
+  context.subscriptions.push(vscode.commands.registerCommand('agentviz.settings', () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:agentviz-local.agent-viz')));
+  // The sidebar icon. Its view is empty, so VS Code shows the welcome text with Open Activity and Settings; showing
+  // the view also opens (or brings forward) the activity tab, so one click on the icon is enough.
+  const view = vscode.window.createTreeView('agentviz.home', { treeDataProvider: { getChildren: () => [], getTreeItem: item => item } });
+  context.subscriptions.push(view, view.onDidChangeVisibility(event => { if (event.visible) openPanel(context); }));
+  if (view.visible) openPanel(context);
 }
 
 function openPanel(context) {
@@ -259,6 +266,7 @@ function openPanel(context) {
         lastWalk = 0;
         void refresh(true);
       }
+      else if (message.type === 'settings') void vscode.commands.executeCommand('agentviz.settings');
       else if (message.type === 'select' && typeof message.id === 'string') {
         // Only an ID present in the current source can be followed, whether or not it was in the returned list.
         choose(index.get(message.id));

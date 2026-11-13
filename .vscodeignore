@@ -7,6 +7,7 @@
 !media/app.js
 !media/view.js
 !media/style.css
+!resources/agentviz.svg
 # Explicit exclusions stay last so they win even if an allow rule above is widened later.
 .git/**
 .vscode/**

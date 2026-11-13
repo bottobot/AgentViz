@@ -26,12 +26,55 @@
     }
   },
   "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentviz",
+          "title": "AgentViz",
+          "icon": "resources/agentviz.svg"
+        }
+      ]
+    },
+    "views": {
+      "agentviz": [
+        {
+          "id": "agentviz.home",
+          "name": "Activity"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "agentviz.home",
+        "contents": "A live picture of your Claude Code and Codex sessions.\n[Open Activity](command:agentviz.open)\n[Settings](command:agentviz.settings)"
+      }
+    ],
     "commands": [
       {
         "command": "agentviz.open",
-        "title": "AgentViz: Open Activity"
+        "title": "AgentViz: Open Activity",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "agentviz.settings",
+        "title": "AgentViz: Settings",
+        "icon": "$(gear)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "agentviz.open",
+          "when": "view == agentviz.home",
+          "group": "navigation@1"
+        },
+        {
+          "command": "agentviz.settings",
+          "when": "view == agentviz.home",
+          "group": "navigation@2"
+        }
+      ]
+    },
     "configuration": {
       "title": "AgentViz",
       "properties": {

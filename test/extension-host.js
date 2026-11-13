@@ -332,7 +332,7 @@ exports.run = async function () {
         await view.focus('refresh');
         const order = ['refresh'];
         const rings = [];
-        for (let n = 0; n < 6; n++) {
+        for (let n = 0; n < 7; n++) {
           await view.session.key('Tab');
           await sleep(60);
           const ring = await view.run(probes.call(probes.focusReport));
@@ -340,7 +340,7 @@ exports.run = async function () {
           if (ring) rings.push(ring);
         }
         // Clear filters is disabled with no filter set, so Tab passes it.
-        assert.deepEqual(order, ['refresh', 'example', 'workspace', 'name-filter', 'id-filter', 'session', 'copy-id']);
+        assert.deepEqual(order, ['refresh', 'settings', 'example', 'workspace', 'name-filter', 'id-filter', 'session', 'copy-id']);
         for (const ring of rings) assert.ok(ring.outlineStyle !== 'none' && ring.devicePixels >= 2 && ring.ratio >= 3 && ring.inView, `A visible focus ring on ${ring.id}: ${JSON.stringify(ring)}`);
         // Typed with real key events into the focused field; Escape empties it.
         await view.focus('name-filter');
@@ -356,7 +356,7 @@ exports.run = async function () {
       await check('webview: accessible names', async () => {
         await followById(CLAUDE_ID, ids.claude);
         const names = await view.run(probes.call(probes.nameReport));
-        assert.deepEqual(Object.fromEntries(names.controls.map(control => [control.id, control.name])), { refresh: 'Refresh', example: 'Show example', workspace: 'Project / workspace', 'name-filter': 'Session name',
+        assert.deepEqual(Object.fromEntries(names.controls.map(control => [control.id, control.name])), { refresh: 'Refresh', settings: 'Settings', example: 'Show example', workspace: 'Project / workspace', 'name-filter': 'Session name',
           'id-filter': 'Session ID (optional)', 'clear-filters': 'Clear filters', session: 'Session', 'copy-id': 'Copy full session ID' });
         assert.deepEqual(names.landmarks.map(landmark => landmark.name), ['Session controls', 'Find a session', 'Followed session', 'Session activity']);
         assert.ok(names.images.length >= 3 && names.images.every(Boolean), `Every graphic has a name: ${JSON.stringify(names.images)}`);

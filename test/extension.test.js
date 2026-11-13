@@ -13,6 +13,8 @@ function host(discoverSessions, workspaceFolders, savedSelection, family, { open
   const readers = [];
   const contexts = [];
   const counts = { panels: 0, reveals: 0 };
+  const executed = [];
+  const views = [];
   let root = firstRoot;
   let stopped = false;
   const disposable = { dispose() {} };
@@ -23,8 +25,8 @@ function host(discoverSessions, workspaceFolders, savedSelection, family, { open
     onDidDispose: callback => { callbacks.dispose = callback; }, dispose() { callbacks.dispose(); }
   };
   const vscode = {
-    commands: { registerCommand: (name, callback) => { callbacks[name === 'agentviz.open' ? 'open' : name] = callback; return disposable; } },
-    window: { createWebviewPanel: () => { counts.panels++; return panel; }, showErrorMessage: message => { throw Error(message); } },
+    commands: { registerCommand: (name, callback) => { callbacks[name === 'agentviz.open' ? 'open' : name] = callback; return disposable; }, executeCommand: async (...args) => { executed.push(args); } },
+    window: { createWebviewPanel: () => { counts.panels++; return panel; }, createTreeView: (id, options) => { views.push({ id, options }); return { visible: false, onDidChangeVisibility: callback => { callbacks.sidebar = callback; return disposable; }, dispose() {} }; }, showErrorMessage: message => { throw Error(message); } },
     workspace: {
       workspaceFolders,
       getConfiguration: () => ({ get: () => root }),
@@ -47,13 +49,30 @@ function host(discoverSessions, workspaceFolders, savedSelection, family, { open
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname, '../src/extension.js'), 'utf8'), sandbox);
   module.exports.activate({ extensionUri: 'extension:', subscriptions: [], workspaceState: { get() { return savedSelection; }, async update() {} } });
   if (open) callbacks.open();
-  return { callbacks, messages, reads, readers, contexts, counts, stopped: () => stopped,
+  return { callbacks, messages, reads, readers, contexts, counts, executed, views, stopped: () => stopped,
     // S07: the entry command another extension calls. The promise is never left unhandled by a throw.
     openSession: argument => Promise.resolve().then(() => callbacks['agentviz.openSession'](argument)),
     setRoot(value) { root = value; if (callbacks.config) callbacks.config({ affectsConfiguration: () => true }); } };
 }
 
 const catalog = root => ({ sessions: [{ id: root, sessionId: 'synthetic', provider: 'claude', project: 'Example', file: `${root}/session.jsonl`, modified: 1 }], warnings: [] });
+
+// The sidebar icon and the Settings button (Robert, 12 November 2026).
+test('the sidebar view opens the activity tab when shown, and Settings opens AgentViz settings from the command and the panel', async () => {
+  const instance = host(() => Promise.resolve(catalog('root')), undefined, undefined, undefined, { open: false });
+  assert.deepEqual(instance.views.map(view => view.id), ['agentviz.home']);
+  assert.equal((await instance.views[0].options.treeDataProvider.getChildren()).length, 0, 'empty, so VS Code shows the welcome text');
+  instance.callbacks.sidebar({ visible: false });
+  assert.equal(instance.counts.panels, 0);
+  instance.callbacks.sidebar({ visible: true });
+  assert.equal(instance.counts.panels, 1);
+  instance.callbacks.sidebar({ visible: true });
+  assert.deepEqual([instance.counts.panels, instance.counts.reveals], [1, 1], 'shown again: the same tab is brought forward');
+  await instance.callbacks['agentviz.settings']();
+  instance.callbacks.message({ type: 'settings' });
+  assert.deepEqual(instance.executed, [['workbench.action.openSettings', '@ext:agentviz-local.agent-viz'], ['agentviz.settings']]);
+  instance.callbacks.dispose();
+});
 
 // SPEC: first-slice acceptance 3 and 5, validated selection and complete disposal.
 test('a configuration change discards an outstanding discovery from the previous source', async () => {
