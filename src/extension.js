@@ -77,6 +77,14 @@ function sourceRoots() {
   return { claudeRoot: folder('claudeRoot', '.claude'), codexRoot: folder('codexRoot', '.codex') };
 }
 
+// Only sessions recorded in an open workspace folder, or below it (worktrees included), are listed (Robert,
+// 2026-11-14). With no folder open there is nothing to scope to, so every session is listed.
+function workspaceScope() {
+  if (vscode.workspace.getConfiguration('agentviz').get('scope') === 'all') return undefined;
+  const folders = (vscode.workspace.workspaceFolders || []).filter(folder => folder.uri?.scheme === 'file').map(folder => folder.uri.fsPath);
+  return folders.length ? folders : undefined;
+}
+
 let panel;
 // Set while a panel is open: makes that panel follow a session found in the current source.
 let follow;
@@ -162,7 +170,7 @@ function openPanel(context) {
           lookupDue = false;
           const roots = sourceRoots();
           // A new filter, or names still being read, reuses the last folder listing; the folders are listed again every 10 seconds.
-          let discovered = await discoverSessions(roots, { query: asked, keep: selected ? [selected.id] : [], walk: listingDue ? undefined : catalog.walk || undefined });
+          let discovered = await discoverSessions(roots, { query: asked, keep: selected ? [selected.id] : [], walk: listingDue ? undefined : catalog.walk || undefined, scope: workspaceScope() });
           if (disposed) return;
           // The source, the selection or the filters changed while this lookup ran: its answer is for an old
           // question. It is not shown, and the lookup is asked again on the next pass.
@@ -177,7 +185,7 @@ function openPanel(context) {
               || discovered.sessions[0] || all[0];
             if (first && first.name === undefined && discovered.walk) {
               // The first choice can be older than the returned list; read its own name before it is shown.
-              discovered = await discoverSessions(roots, { query: asked, keep: [first.id], walk: discovered.walk });
+              discovered = await discoverSessions(roots, { query: asked, keep: [first.id], walk: discovered.walk, scope: workspaceScope() });
               if (disposed) return;
               if (revision !== generation || asked !== query) { lookupDue = true; return; }
               all = discovered.all || discovered.sessions;
@@ -187,7 +195,10 @@ function openPanel(context) {
           catalog = { ...emptyCatalog(), ...discovered };
           answered = asked;
           index = new Map(all.map(session => [session.id, session]));
-          sourceFiles = all;
+          // A followed session outside the workspace scope is still the viewer's choice: it stays followable.
+          for (const session of discovered.kept || []) if (!index.has(session.id)) index.set(session.id, session);
+          // Subagent transcripts are looked for in the whole listing, so a followed session keeps its lanes.
+          sourceFiles = discovered.walk?.files || all;
           if (listingDue) lastWalk = Date.now();
           // The followed session is looked up by its stable ID. It is never replaced by a neighbour: a transcript
           // that has left the source stays named and is reported as missing.
@@ -297,8 +308,11 @@ function openPanel(context) {
       lastWalk = 0;
       void refresh(true);
     });
+    // A folder added to or removed from the workspace changes the scope: list again at once.
+    const folders = vscode.workspace.onDidChangeWorkspaceFolders?.(() => { lastWalk = 0; lookupDue = true; void refresh(true); });
     const timer = setInterval(() => { void refresh(); }, 1000);
     current.onDidDispose(() => {
+      folders?.dispose();
       disposed = true;
       clearInterval(timer);
       messages.dispose();

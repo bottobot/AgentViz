@@ -84,6 +84,19 @@
           "scope": "machine",
           "description": "Claude configuration folder. Empty uses the local .claude folder. Only its projects folder is read."
         },
+        "agentviz.scope": {
+          "type": "string",
+          "enum": [
+            "workspace",
+            "all"
+          ],
+          "enumDescriptions": [
+            "Only sessions recorded in an open workspace folder or below it (worktrees included).",
+            "Every session in the configured Claude and Codex folders."
+          ],
+          "default": "workspace",
+          "description": "Which sessions AgentViz lists. With no folder open, every session is listed."
+        },
         "agentviz.codexRoot": {
           "type": "string",
           "default": "",

@@ -107,7 +107,7 @@ function launchArguments(folders, port, checkout = CHECKOUT) {
 
 // The isolated profile's settings: both sources point at the synthetic folder, and nothing calls home.
 function profileSettings(folders) {
-  return { 'agentviz.claudeRoot': folders.fixture, 'agentviz.codexRoot': folders.fixture, 'telemetry.telemetryLevel': 'off', 'update.mode': 'none',
+  return { 'agentviz.claudeRoot': folders.fixture, 'agentviz.codexRoot': folders.fixture, 'agentviz.scope': 'all', 'telemetry.telemetryLevel': 'off', 'update.mode': 'none',
     'extensions.autoUpdate': false, 'extensions.autoCheckUpdates': false, 'workbench.enableExperiments': false, 'window.restoreWindows': 'none',
     'security.workspace.trust.enabled': false, 'workbench.startupEditor': 'none', 'workbench.colorTheme': 'Default Dark Modern' };
 }

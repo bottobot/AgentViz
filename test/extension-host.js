@@ -329,13 +329,22 @@ exports.run = async function () {
       await check('webview: keyboard focus order', async () => {
         await followById(CLAUDE_ID, ids.claude);
         await view.session.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
-        await view.focus('refresh');
+        // Reached by the keyboard only: after a scripted focus, VS Code's webview often left the next controls without
+        // :focus-visible (no ring) although Tab moved focus. Blur, then Tab until Refresh has focus.
+        await view.run('document.activeElement && document.activeElement.blur(), true');
+        for (let n = 0; n < 40; n++) {
+          await view.session.key('Tab');
+          await sleep(40);
+          const at = await view.run('document.activeElement ? document.activeElement.id : ""');
+          if (at === 'refresh') break;
+        }
         const order = ['refresh'];
         const rings = [];
         for (let n = 0; n < 7; n++) {
           await view.session.key('Tab');
           await sleep(60);
-          const ring = await view.run(probes.call(probes.focusReport));
+          let ring = await view.run(probes.call(probes.focusReport));
+          if (ring && ring.outlineStyle === 'none') { await sleep(200); ring = await view.run(probes.call(probes.focusReport)); }
           order.push(ring ? ring.id : '');
           if (ring) rings.push(ring);
         }

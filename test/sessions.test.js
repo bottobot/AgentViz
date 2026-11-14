@@ -290,6 +290,32 @@ test('workspaces group by recorded directory, with distinct labels for duplicate
   assert.deepEqual(again.map(publicFields), sessions.map(publicFields));
 });
 
+// Workspace scope (Robert, 2026-11-14): only sessions recorded in an open folder or below it are listed, counted
+// and grouped; Windows paths match without case or separator differences; a sibling folder with the same prefix
+// does not count; the followed session (keep) stays listed wherever it is.
+test('a scope keeps only sessions in the workspace folders and their subfolders, worktrees included', async (t) => {
+  const { claudeRoot, codexRoot, claudeDir, codexDir } = await roots(t);
+  const ids = ['a', 'b', 'c'].map(letter => `019a0000-bbbb-7bbb-8ccc-00000000000${letter}`);
+  await fs.writeFile(path.join(claudeDir, 'root.jsonl'), prompt('C:\\Work\\Alpha'));
+  await fs.writeFile(path.join(claudeDir, 'worktree.jsonl'), prompt('C:\\Work\\Alpha\\.agentboard\\wt\\1a2b3c'));
+  await fs.writeFile(rollout(codexDir, ids[0]), codexMeta('c:/work/ALPHA/src/', ids[0]));
+  await fs.writeFile(path.join(claudeDir, 'sibling.jsonl'), prompt('C:\\Work\\AlphaBeta'));
+  await fs.writeFile(rollout(codexDir, ids[1]), codexMeta('D:\\Elsewhere', ids[1]));
+  await fs.writeFile(rollout(codexDir, ids[2]), codexMeta('/home/dev/alpha', ids[2]));
+  const scoped = await discoverSessions({ claudeRoot, codexRoot }, { scope: ['C:\\Work\\Alpha\\'], keep: [] });
+  assert.deepEqual(scoped.sessions.map(session => session.sessionId).sort(), [ids[0], 'root', 'worktree'].sort());
+  assert.equal(scoped.total, 3);
+  assert.equal(scoped.outside, 3);
+  assert.equal(scoped.workspaces.reduce((sum, group) => sum + group.count, 0), 3);
+  assert.equal(scoped.all.length, 3);
+  const followed = (await discoverSessions({ claudeRoot, codexRoot })).sessions.find(session => session.sessionId === ids[1]);
+  const keeping = await discoverSessions({ claudeRoot, codexRoot }, { scope: ['C:\\Work\\Alpha'], keep: [followed.id] });
+  assert.deepEqual(keeping.kept.map(session => session.sessionId), [ids[1]]);
+  assert.equal(keeping.sessions.some(session => session.sessionId === ids[1]), false);
+  const unscoped = await discoverSessions({ claudeRoot, codexRoot });
+  assert.equal(unscoped.total, 6);
+});
+
 // SPEC: S01, metadata lookup is read only.
 test('discovery leaves provider folders byte-for-byte untouched and creates no files', async (t) => {
   const { folder, claudeRoot, codexRoot, claudeDir, codexDir, index } = await roots(t);

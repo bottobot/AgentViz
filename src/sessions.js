@@ -398,6 +398,16 @@ async function walkSources({ claudeRoot, codexRoot }) {
   return { files, warnings };
 }
 
+// A folder as a comparable text: Windows paths without case, separators or a trailing slash; POSIX as written.
+function scopePath(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  const text = value.trim().replace(/^\\\\\?\\UNC\\/i, '\\\\').replace(/^\\\\\?\\/, '');
+  const windows = /^[a-z]:(?:[\\/]|$)/i.test(text) || text.startsWith('\\\\');
+  const clean = (windows ? text.replace(/\\/g, '/').toLowerCase() : text).replace(/\/+$/, '');
+  return (windows ? 'win:' : 'posix:') + clean;
+}
+const within = (scope, cwd) => { const path = scopePath(cwd); return Boolean(path) && scope.some(root => path === root || path.startsWith(root + '/')); };
+
 const needle = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
 
 // The host query contract (S03). `options` is a number (the response cap) or
@@ -413,11 +423,12 @@ async function discoverSessions(roots, options = {}) {
   const query = { workspaceKey: typeof settings.query?.workspaceKey === 'string' ? settings.query.workspaceKey : '', name: needle(settings.query?.name), id: needle(settings.query?.id) };
   const keep = new Set(Array.isArray(settings.keep) ? settings.keep : []);
   const walked = settings.walk || await walkSources(roots);
-  const files = walked.files;
+  let files = walked.files;
   const warnings = [...walked.warnings];
   const cost = { files: files.length, walked: !settings.walk, opened: 0, bytesRead: 0 };
   const budget = { heads: settings.headBudget ?? HEAD_PASS, remaining: settings.titleBudget ?? TITLE_SCAN_BUDGET, cost };
   const pending = { workspaces: 0, names: 0 };
+  let outsideScope = 0;
   const entries = new Map();
   const unreadable = new Set();
   async function metadata(session, titles) {
@@ -436,7 +447,7 @@ async function discoverSessions(roots, options = {}) {
   }
 
   // 1. Project of every session: one small read per transcript, remembered until that transcript changes.
-  const kept = files.filter(session => keep.has(session.id));
+  let kept = files.filter(session => keep.has(session.id));
   for (const session of [...kept, ...files]) if (!entries.has(session)) await metadata(session, false);
   const identities = new Map();
   const counts = new Map();
@@ -452,8 +463,26 @@ async function discoverSessions(roots, options = {}) {
     if (identity && !identities.has(identity.key)) identities.set(identity.key, identity);
     counts.set(session.workspaceKey, (counts.get(session.workspaceKey) || 0) + 1);
   }
+  // Scope (Robert, 2026-11-14): with `scope` set, only sessions whose recorded working folder is one of those
+  // folders or below it (worktrees under .agentboard/wt included) are listed, counted or followed. A session whose
+  // folder is not read yet waits outside until it is; one with no recorded folder stays outside.
+  const scope = Array.isArray(settings.scope) ? settings.scope.map(scopePath).filter(Boolean) : null;
+  if (scope) {
+    let outside = 0;
+    files = files.filter(session => {
+      const inside = within(scope, entries.get(session)?.cwd);
+      if (!inside) outside++;
+      return inside;
+    });
+    for (const key of [...counts.keys()]) counts.delete(key);
+    for (const session of files) counts.set(session.workspaceKey, (counts.get(session.workspaceKey) || 0) + 1);
+    pending.workspaces = 0;
+    for (const session of walked.files) if (session.workspaceKey === undefined) pending.workspaces++;
+    outsideScope = outside;
+  }
+  // The followed session (keep) is the viewer's own choice and stays listed even outside the scope.
   const labels = workspaceLabels(identities);
-  for (const session of files) session.workspaceLabel = labels.get(session.workspaceKey) || UNKNOWN_WORKSPACE_LABEL;
+  for (const session of walked.files) session.workspaceLabel = labels.get(session.workspaceKey) || UNKNOWN_WORKSPACE_LABEL;
   const workspaces = [...counts].map(([key, count]) => ({ key, label: labels.get(key) || UNKNOWN_WORKSPACE_LABEL, count }))
     .sort((a, b) => a.label.localeCompare(b.label) || a.key.localeCompare(b.key));
 
@@ -495,7 +524,7 @@ async function discoverSessions(roots, options = {}) {
     const listed = new Set(files.map(session => session.file));
     for (const file of metadataCache.keys()) if (!listed.has(file)) metadataCache.delete(file);
   }
-  return { sessions, kept, warnings: [...new Set(warnings)], total: files.length, matched: matches.length, limit, workspaces, pending, all: files, walk: walked, cost };
+  return { sessions, kept, warnings: [...new Set(warnings)], total: files.length, matched: matches.length, limit, workspaces, pending, all: files, walk: walked, cost, outside: outsideScope };
 }
 
 // Verified local shape (2026-11-12): <codexRoot>/session_index.jsonl holds appended lines {id, thread_name, updated_at}.

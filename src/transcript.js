@@ -198,7 +198,8 @@ function createSession(provider, id) {
     position: { value: -1, writable: true },
     turnAt: { value: -1, writable: true },
     model: { value: '', writable: true },
-    turnSeen: { value: false, writable: true }
+    turnSeen: { value: false, writable: true },
+    lastPrompt: { value: null, writable: true }
   });
   return state;
 }
@@ -398,6 +399,19 @@ function failedOutput(output) {
   return !!exit && Number(exit[1]) !== 0;
 }
 
+const CODEX_INSTRUCTION = /^\s*(?:# AGENTS\.md instructions|<environment_context|<user_instructions|<permissions|<INSTRUCTIONS>|<turn_aborted)/;
+// One prompt mark per prompt. Older rollouts can hold the same prompt in both forms (event_msg user_message and
+// a user message item); the second form within three seconds of the first is the same prompt.
+function codexPrompt(state, time, id, form) {
+  if (!Number.isFinite(time)) return;
+  const last = state.lastPrompt;
+  if (last && last.form !== form && Math.abs(time - last.time) <= 3000) return;
+  state.lastPrompt = { time, form };
+  state.turnAt = state.position;
+  marker(state, time, 'prompt', id, 'User prompt');
+  state.status = 'active';
+}
+
 function applyRecord(state, record) {
   if (!record || typeof record !== 'object') return;
   const time = typeof record.timestamp === 'string' ? Date.parse(record.timestamp) : NaN;
@@ -466,6 +480,16 @@ function applyRecord(state, record) {
     return;
   }
   if (record.type === 'response_item') {
+    // Verified local shape (2026-11-13, every local rollout from 2026-09 to 2026-11): Codex no longer writes
+    // event_msg user_message; a prompt is a response_item message with role user. The instruction blocks it also
+    // sends that way (AGENTS.md, environment context, permissions, an abort notice) are not prompts. Only the
+    // text's opening is looked at, and nothing of it is kept.
+    if (payload.type === 'message' && payload.role === 'user') {
+      const parts = Array.isArray(payload.content) ? payload.content : [];
+      const typed = parts.some(part => typeof part?.text === 'string' && part.text.trim() && !CODEX_INSTRUCTION.test(part.text.slice(0, 200)));
+      if (typed) codexPrompt(state, time, payload.id, 'response');
+      return;
+    }
     if (payload.type === 'function_call' || payload.type === 'custom_tool_call') {
       let input = payload.input;
       if (typeof payload.arguments === 'string') {
@@ -489,11 +513,8 @@ function applyRecord(state, record) {
     return;
   }
   if (record.type !== 'event_msg') return;
-  if (payload.type === 'user_message') {
-    state.turnAt = state.position;
-    marker(state, time, 'prompt', payload.id, 'User prompt');
-    state.status = 'active';
-  } else if (payload.type === 'task_started') {
+  if (payload.type === 'user_message') codexPrompt(state, time, payload.id, 'event');
+  else if (payload.type === 'task_started') {
     state.turnAt = state.position;
     state.turnSeen = true;
     state.turn = payload.turn_id || null;

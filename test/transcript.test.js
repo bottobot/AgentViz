@@ -40,6 +40,24 @@ test('Codex parses function and custom calls, handles unknown records, and detec
   assert.doesNotMatch(JSON.stringify(state), /PRIVATE_/);
 });
 
+// Current Codex rollouts write a prompt only as a user message item; instruction blocks sent the same way are not
+// prompts, and an older rollout holding both forms of one prompt gets one mark.
+test('Codex prompts are marked from user message items, without instruction blocks or doubles, and keep no text', () => {
+  const at = seconds => new Date(Date.parse(time) + seconds * 1000).toISOString();
+  const item = (seconds, text, id) => ({ type: 'response_item', timestamp: at(seconds), payload: { type: 'message', role: 'user', id, content: [{ type: 'input_text', text }] } });
+  const state = createSession('codex', 'session');
+  applyRecord(state, item(0, '# AGENTS.md instructions for C:/private\nPRIVATE_RULES', 'm0'));
+  applyRecord(state, item(0, '<environment_context>PRIVATE_ENV</environment_context>', 'm1'));
+  applyRecord(state, item(1, 'PRIVATE_PROMPT please list the files', 'm2'));
+  applyRecord(state, item(30, '<turn_aborted>PRIVATE</turn_aborted>', 'm3'));
+  applyRecord(state, item(60, 'PRIVATE_PROMPT second task', 'm4'));
+  applyRecord(state, { type: 'event_msg', timestamp: at(61), payload: { type: 'user_message', message: 'PRIVATE_PROMPT second task' } });
+  applyRecord(state, { type: 'event_msg', timestamp: at(120), payload: { type: 'user_message', id: 'u5', message: 'PRIVATE_PROMPT third task' } });
+  assert.deepEqual(state.events.map(event => [event.kind, event.time - Date.parse(time)]), [['prompt', 1000], ['prompt', 60000], ['prompt', 120000]]);
+  assert.equal(state.status, 'active');
+  assert.doesNotMatch(JSON.stringify(state), /PRIVATE_/);
+});
+
 test('lifecycle and context come from source records, never from tool counts', () => {
   const state = createSession('codex', 'session');
   assert.equal(state.context, null);
