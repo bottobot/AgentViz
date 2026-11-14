@@ -91,7 +91,7 @@
             "all"
           ],
           "enumDescriptions": [
-            "Only sessions recorded in an open workspace folder or below it (worktrees included).",
+            "Only sessions recorded in an open workspace folder or below it (worktrees included), grouped under that folder.",
             "Every session in the configured Claude and Codex folders."
           ],
           "default": "workspace",

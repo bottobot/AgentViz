@@ -406,7 +406,14 @@ function scopePath(value) {
   const clean = (windows ? text.replace(/\\/g, '/').toLowerCase() : text).replace(/\/+$/, '');
   return (windows ? 'win:' : 'posix:') + clean;
 }
-const within = (scope, cwd) => { const path = scopePath(cwd); return Boolean(path) && scope.some(root => path === root || path.startsWith(root + '/')); };
+// The scope folder a working folder is, or sits below: the deepest one when scope folders nest. Null when outside.
+function scopeHome(scope, cwd) {
+  const path = scopePath(cwd);
+  if (!path) return null;
+  let home = null;
+  for (const folder of scope) if ((path === folder.root || path.startsWith(folder.root + '/')) && (!home || folder.root.length > home.root.length)) home = folder;
+  return home;
+}
 
 const needle = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
 
@@ -449,12 +456,20 @@ async function discoverSessions(roots, options = {}) {
   // 1. Project of every session: one small read per transcript, remembered until that transcript changes.
   let kept = files.filter(session => keep.has(session.id));
   for (const session of [...kept, ...files]) if (!entries.has(session)) await metadata(session, false);
+  // Scope (Robert, 2026-11-14): with `scope` set, only sessions whose recorded working folder is one of those
+  // folders or below it (worktrees under .agentboard/wt included) are listed, counted or followed. A session whose
+  // folder is not read yet waits outside until it is; one with no recorded folder stays outside.
+  // A session below a scope folder is grouped under that folder, so the project list holds one entry for each
+  // open folder and not one for every worktree or subfolder a session ran in.
+  const scope = Array.isArray(settings.scope)
+    ? settings.scope.map(folder => ({ root: scopePath(folder), identity: workspaceIdentity(typeof folder === 'string' ? folder.trim() : folder) })).filter(folder => folder.root && folder.identity)
+    : null;
   const identities = new Map();
   const counts = new Map();
   for (const session of files) {
     const entry = entries.get(session);
     if (!entry && !unreadable.has(session)) { session.workspaceKey = undefined; pending.workspaces++; continue; }
-    const identity = workspaceIdentity(entry?.cwd);
+    const identity = (scope && scopeHome(scope, entry?.cwd)?.identity) || workspaceIdentity(entry?.cwd);
     session.project = identity ? projectName(entry.cwd) : '';
     // Host only: the parent thread a Codex rollout names in its own first record (S04).
     session.parentId = entry?.parent || '';
@@ -463,14 +478,10 @@ async function discoverSessions(roots, options = {}) {
     if (identity && !identities.has(identity.key)) identities.set(identity.key, identity);
     counts.set(session.workspaceKey, (counts.get(session.workspaceKey) || 0) + 1);
   }
-  // Scope (Robert, 2026-11-14): with `scope` set, only sessions whose recorded working folder is one of those
-  // folders or below it (worktrees under .agentboard/wt included) are listed, counted or followed. A session whose
-  // folder is not read yet waits outside until it is; one with no recorded folder stays outside.
-  const scope = Array.isArray(settings.scope) ? settings.scope.map(scopePath).filter(Boolean) : null;
   if (scope) {
     let outside = 0;
     files = files.filter(session => {
-      const inside = within(scope, entries.get(session)?.cwd);
+      const inside = Boolean(scopeHome(scope, entries.get(session)?.cwd));
       if (!inside) outside++;
       return inside;
     });
@@ -479,6 +490,9 @@ async function discoverSessions(roots, options = {}) {
     pending.workspaces = 0;
     for (const session of walked.files) if (session.workspaceKey === undefined) pending.workspaces++;
     outsideScope = outside;
+    // Labels are told apart only among the projects that can be shown: the listed ones and the followed one.
+    const shown = new Set([...files, ...kept].map(session => session.workspaceKey));
+    for (const key of [...identities.keys()]) if (!shown.has(key)) identities.delete(key);
   }
   // The followed session (keep) is the viewer's own choice and stays listed even outside the scope.
   const labels = workspaceLabels(identities);

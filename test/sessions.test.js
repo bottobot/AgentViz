@@ -291,7 +291,7 @@ test('workspaces group by recorded directory, with distinct labels for duplicate
 });
 
 // Workspace scope (Robert, 2026-11-14): only sessions recorded in an open folder or below it are listed, counted
-// and grouped; Windows paths match without case or separator differences; a sibling folder with the same prefix
+// and grouped under that open folder; Windows paths match without case or separator differences; a sibling folder with the same prefix
 // does not count; the followed session (keep) stays listed wherever it is.
 test('a scope keeps only sessions in the workspace folders and their subfolders, worktrees included', async (t) => {
   const { claudeRoot, codexRoot, claudeDir, codexDir } = await roots(t);
@@ -306,8 +306,14 @@ test('a scope keeps only sessions in the workspace folders and their subfolders,
   assert.deepEqual(scoped.sessions.map(session => session.sessionId).sort(), [ids[0], 'root', 'worktree'].sort());
   assert.equal(scoped.total, 3);
   assert.equal(scoped.outside, 3);
-  assert.equal(scoped.workspaces.reduce((sum, group) => sum + group.count, 0), 3);
+  // One project entry for the open folder: the worktree and the subfolder are grouped under it, not listed apart.
+  assert.deepEqual(scoped.workspaces.map(group => [group.label, group.count]), [['Alpha', 3]]);
+  assert.equal(new Set(scoped.sessions.map(session => session.workspaceKey)).size, 1);
+  assert.deepEqual(scoped.sessions.map(session => session.workspaceLabel), ['Alpha', 'Alpha', 'Alpha']);
   assert.equal(scoped.all.length, 3);
+  // Nested scope folders: a session belongs to the deepest one it sits in.
+  const nested = await discoverSessions({ claudeRoot, codexRoot }, { scope: ['C:\\Work\\Alpha', 'C:\\Work\\Alpha\\src'] });
+  assert.deepEqual(nested.workspaces.map(group => [group.label, group.count]), [['Alpha', 2], ['src', 1]]);
   const followed = (await discoverSessions({ claudeRoot, codexRoot })).sessions.find(session => session.sessionId === ids[1]);
   const keeping = await discoverSessions({ claudeRoot, codexRoot }, { scope: ['C:\\Work\\Alpha'], keep: [followed.id] });
   assert.deepEqual(keeping.kept.map(session => session.sessionId), [ids[1]]);
