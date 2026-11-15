@@ -12,7 +12,7 @@ Why (Robert): long-horizon tasks are complex and hard to keep track of. Reading 
 
 Updated 15 November 2026, after the tidy-up that is Phase 0 of the roadmap. **The roadmap is `docs/ROADMAP.md`**: what is built, a freshness rating for every document here, and the next phases.
 
-Everything built so far is on `feat/first-activity-view`. `origin` holds it up to `05af8e5` (15 November), which includes the tidy-up (`37c7567`), the Station Observatory files (`bb0334e`) and card `fac574` (`6574c02`). Those were pushed when AgentBoard finished card `fac574`. The refreshed plan and brief are one local commit after that, not pushed.
+Everything built so far is on `feat/first-activity-view`. `origin` holds it up to `eb891f1` (15 November), which includes the tidy-up (`37c7567`), the Station Observatory files (`bb0334e`), card `fac574` (`6574c02`) and the refreshed plan and brief (`eb891f1`).
 
 `agent-viz-0.2.0.vsix`, built from `05af8e5`, was installed in Robert's normal VS Code on 15 November 2026, at his request, replacing `0.1.0`. `code --list-extensions` shows `agentviz-local.agent-viz@0.2.0`. It has not been used on a real session yet. Nothing is published. Nothing was changed in AgentBoard.
 
@@ -61,6 +61,7 @@ Each receipt is separate. The host receipt comes from a real VS Code run, not fr
 - The installed `0.2.0` on real sessions. It is installed in the normal VS Code profile; nobody has opened it there yet. The host check runs the checkout, and `package:check` proves the packaged files equal it.
 - The copy to clipboard in the default host run (it passed once in S09 with `--clipboard`).
 - The cause of the one failed browser run above.
+- The cause of one failed unit run. On 15 November the test "Refresh recovers an edit between the rewrite samples" (`test/resilience.test.js`) failed once in a full `npm test`, on a change that touched only documents. It passed in the next four full runs and in eight runs of its own file. The failure message was not captured. Treat it as an intermittent, timing-sensitive test until someone finds out.
 
 ### Deferred
 
@@ -83,9 +84,8 @@ All are in the README limits.
 
 1. **Use it.** `0.2.0` is installed. Reload VS Code, open AgentViz from the activity bar, and follow a real session for a few days. Note what you look at and what is missing.
 2. **Launch the Station Observatory plan.** You chose the Station Observatory on 12 November. Its prototype, research, brief and plan are in Git since 15 November (`bb0334e`), and the plan and brief were refreshed the same day for details on click, the eight concept pages and the data research. In AgentBoard: **Run a Plan**, **Station Observatory: inspectable session world**. Eleven steps; it builds a prototype on synthetic data and ends with a written spec for wiring it to real data.
-3. **Data sources.** The research of 14 November (`docs/research/2026-11-14-provider-sdk-architecture.md`) recommends testing Codex App Server, then Claude's session utilities. Not started. It may fix the empty Codex file activity.
+3. **Data sources.** The research of 14 November (`docs/research/2026-11-14-provider-sdk-architecture.md`) recommends testing Codex App Server, then Claude's session utilities. A read-only plan for it is prepared and not launched: **Run a Plan**, **Data sources: test Codex App Server and Claude SDK reads** (`workflows/data-source-experiments.plan.json`, brief `docs/handoffs/2026-11-15-data-source-experiments.md`). It may fix the empty Codex file activity. Its preview has one setting, `real_samples`: how many real transcripts per provider it may copy into a temporary folder.
 4. **Task progress** reads "Unavailable" for real sessions on this PC (recorded 12 November, not rechecked). No fix is known.
-5. **Push.** One local commit, the plan refresh, is not on `origin`.
 
 ### Where the earlier history is
 

@@ -32,6 +32,7 @@ Scale: **10** = matches the code and Git state today and you can act on it. **1*
 | 10 | `HANDOFF.md` | State section rewritten 15 November. Lower half is history. | Current state, what is verified, what is deferred. |
 | 10 | `workflows/checks.json` | Every command works. `package-check` added. | Running the checks. |
 | 10 | `docs/research/2026-11-14-provider-sdk-architecture.md` | One day old. Nothing in it has been acted on. | The data-source track: Codex App Server first, then Claude session utilities. |
+| 10 | `workflows/data-source-experiments.plan.json`, `docs/handoffs/2026-11-15-data-source-experiments.md` | Written 15 November. The plan passes AgentBoard's schema and its own validation. Not launched. | Launching the data-source experiments. |
 | 9 | `workflows/station-observatory-world.plan.json` | Refreshed 15 November. Passes AgentBoard's plan schema; its loader lists it with no error. Not launched. | Launching the next build. |
 | 9 | `docs/handoffs/2026-11-12-station-observatory-next-phase.md` | A dated "Updates" section at the top corrects what changed. The body below it is kept as written on 12 November. | The brief for the next build. |
 | 9 | `docs/development/agentviz-next-parallel-run.md` | Corrected 15 November from Git. | What the parallel plan really did. |
@@ -84,6 +85,10 @@ To launch: in AgentBoard, **Run a Plan**, then **Station Observatory: inspectabl
 
 ### Phase 4: better data sources (can run beside Phase 3)
 
+**A plan is prepared and not launched:** `workflows/data-source-experiments.plan.json`, with its brief `docs/handoffs/2026-11-15-data-source-experiments.md`. Five steps. It is read-only, runs on temporary folders, spends no model usage and changes nothing in the product. It covers items 1 and 3 below and ends with a report and a verdict for each interface. Item 2, the live test, is only drafted by its last step: it needs a real agent run, so it is your call.
+
+To launch: in AgentBoard, **Run a Plan**, then **Data sources: test Codex App Server and Claude SDK reads**. In the preview, `real_samples` sets how many of your real transcripts per provider a step may copy into a temporary folder (default 3; set 0 for none). Only counts and field names from them are ever written down. Without real samples the plan cannot say whether real Codex edits show up as file changes.
+
 From the 14 November research. Keep reading transcripts; add official interfaces where they give more:
 
 1. **Codex App Server, history first.** Compare its history reads with what the transcript reader produces. Read only, no agent run.
@@ -118,6 +123,5 @@ Linux and VSCodium (lilguy) have never been run. The host runner exits as unveri
 ## Decisions that are yours
 
 1. **Launch the Station Observatory plan** (Phase 3)?
-2. **Start the data-source experiments** (Phase 4)? They need a plan or a card written first.
+2. **Launch the data-source plan** (Phase 4)? Decide in its preview whether it may copy real transcripts (`real_samples`).
 3. **Task progress reads "Unavailable"** for real sessions on this PC (recorded 12 November, not rechecked): accept that for now? Nothing researched so far solves it.
-4. **Push.** The plan refresh commit is local only. The earlier 15 November commits are on `origin`.
