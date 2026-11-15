@@ -2,6 +2,33 @@
 
 Prepared 12 November 2026 for AgentBoard's **Load handoff**. This is the implementation brief, not an executable Run a Plan JSON file. Loading it fills the prompt box; it does not launch work.
 
+## Updates since this brief was written (15 November 2026)
+
+Read this section first. Where it disagrees with the text below, this section is right. The text below is kept as written on 12 November, including Robert's words.
+
+1. **The prototype is in Git.** The prototype, the research report, this brief and the plan were committed on 15 November (`bb0334e`), so a new worktree has them. Items 4 and 5 of "First actions and continuity" no longer apply: copy nothing from the main checkout.
+2. **Details on click is in the product** (`7fc2ca4`, `src/detail.js`). Click a station, lane, file, bar or recent row in the real view and it lists the calls behind it. Choose one and the host reads that call again from the transcript and shows the tool, full input, output, start, finish, duration, model, token counts, the turn's prompt and the agent's messages. Nothing is kept, and closing the panel removes the text. This changes two rows of "Real data gaps":
+   - **Real payload details** are no longer excluded outright. They are read on request, one call at a time. Nothing in what the panel shows is redacted.
+   - **Exact tool durations** are half closed. The host keeps a call's recorded end time (`event.at.finished`). The live event sent to the view still has no end time.
+3. **Other product changes.** Only sessions of the open workspace are listed by default (`b047fc1`). There is a sidebar icon and a Settings button. The view and the host speak one filter request format, and the version is `0.2.0` (`37c7567`). `HANDOFF.md` and `docs/ROADMAP.md` are current. `ORCHESTRATION.md` is history.
+4. **Eight concept pages exist** (`docs/concepts/`; open `docs/concepts/index.html`). They were built after Robert chose the stations, as eight other ways to show the same session, each with working drill-down, to be mined for parts. They are material, not the direction: the station look stays. See the table below.
+5. **Data source research exists** (`docs/research/2026-11-14-provider-sdk-architecture.md`). It recommends testing Codex App Server, then Claude's session utilities, behind the existing normalization. It tested nothing. It matters for the production bridge: App Server reports command duration, exit status and file changes as structured records.
+6. **The plan is `workflows/station-observatory-world.plan.json`**, refreshed on 15 November for the five points above. Not launched.
+
+### Concept pages to mine, per lens
+
+Borrow interaction ideas only. Do not copy a concept's look, edit anything in `docs/concepts/`, or load `docs/concepts/shared/sim.js`.
+
+| Lens | Pages worth opening | What to look at |
+|---|---|---|
+| A. Session islands | `05-cell`, `06-galaxy`, `03-factory` | Subagents budding off a parent. Files grouped by folder as places. A subagent annex (it draws only the five newest: do better) |
+| B. Follow one call | `01-circuit`, `08-departures`, `07-console`, `02-watershed` | Pulses along fixed traces. Retries drawn as a jumper wire or a go-around. A patch bay that draws every hop as a cable (its cables cannot be reached with Tab: fix that). Width for how much data moved |
+| C. Time | `04-score`, `06-galaxy`, `07-console`, `01-circuit` | Call length drawn as duration. Cause links drawn as slurs. A flight recorder you scrub. Rewinding the whole view. A logic-analyzer timeline |
+| D. Inspector | all eight; start with `08-departures` and `03-factory` | What each page shows for one call, one file, the context window and one error: exit codes, test results, diffs, cause chains |
+| E. 3D | `06-galaxy` | Zoom and pan |
+
+`docs/concepts/README.md` lists each page's known rough edges. Do not repeat them.
+
 ## Objective
 
 Expand the existing animated Station Observatory into a substantial, user-friendly way to inspect coding-agent sessions as activity arrives. Preserve the station design Robert likes. Add connected sessions and subagents, event-triggered request/result signals, deeper inspection and synchronized time navigation. Explore meaningful 3D interaction while retaining a readable fixed view.

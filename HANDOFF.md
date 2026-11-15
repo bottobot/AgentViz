@@ -12,14 +12,16 @@ Why (Robert): long-horizon tasks are complex and hard to keep track of. Reading 
 
 Updated 15 November 2026, after the tidy-up that is Phase 0 of the roadmap. **The roadmap is `docs/ROADMAP.md`**: what is built, a freshness rating for every document here, and the next phases.
 
-Everything built so far is on `feat/first-activity-view` at `b047fc1`, and `origin` holds the same commit. The tidy-up of 15 November was made on `task/3cdf0f`, on top of that commit. Nothing is published or installed in the normal editor profile. Nothing was changed in AgentBoard.
+Everything built so far is on `feat/first-activity-view`. `origin` holds it up to `05af8e5` (15 November), which includes the tidy-up (`37c7567`), the Station Observatory files (`bb0334e`) and card `fac574` (`6574c02`). Those were pushed when AgentBoard finished card `fac574`. The refreshed plan and brief are one local commit after that, not pushed.
+
+`agent-viz-0.2.0.vsix`, built from `05af8e5`, was installed in Robert's normal VS Code on 15 November 2026, at his request, replacing `0.1.0`. `code --list-extensions` shows `agentviz-local.agent-viz@0.2.0`. It has not been used on a real session yet. Nothing is published. Nothing was changed in AgentBoard.
 
 The lists below are deliberately separate. "Implemented" is not "verified".
 
 ### Implemented
 
 - **Find a session by project, then name, then ID** (S01 to S03). Project is the transcript's recorded working directory. Name is the provider's saved title, else `Unnamed session`. ID is full or partial. Filters run over every transcript before the list is cut to 80. The followed session never switches on its own.
-- **Workspace scope** (`b047fc1`): by default only sessions recorded in an open workspace folder, or below it, are listed. `agentviz.scope: all` lists everything.
+- **Workspace scope** (`b047fc1`): by default only sessions recorded in an open workspace folder, or below it, are listed. `agentviz.scope: all` lists everything. A session recorded in a worktree or subfolder is grouped under its open folder, so the project list has one entry per open folder (`6574c02`).
 - **Agent lanes** (S04): the followed session and its subagents on one time axis.
 - **Task list progress** (S05) from the agent's own list records.
 - **File activity footprint** (S06) from structured file tools.
@@ -31,7 +33,7 @@ The lists below are deliberately separate. "Implemented" is not "verified".
 
 `README.md` is the description of current behaviour, privacy, launch steps and limits.
 
-### Verified (15 November 2026, native Windows 11, synthetic data, on the tidied checkout)
+### Verified (15 November 2026, native Windows 11, synthetic data, on `05af8e5`)
 
 | Check | Command | Result |
 | --- | --- | --- |
@@ -40,7 +42,7 @@ The lists below are deliberately separate. "Implemented" is not "verified".
 | package | `npm run package` | `agent-viz-0.2.0.vsix`, 13 entries: 11 product files plus 2 written by the tool |
 | package contents | `npm run package:check` | exit 0: exact inclusion set, no local path inside, files equal the checkout |
 | host | `npm run host` | exit 0: VS Code 1.146.0, 31 checks in the real webview, 1 optional check not run (clipboard) |
-| browser | `npm run browser` | 12 of 12 in five runs out of six. The first run reported 11 of 12; which check failed was not captured, and it did not recur |
+| browser | `npm run browser` | 12 of 12 on `05af8e5`. Earlier the same day, on the tidied code before card `fac574` was merged, one run in six reported 11 of 12; which check failed was not captured, and it did not recur |
 
 The unit count fell from 163 to 145 because 18 tests covered the code that was removed (the second request format and the second runner). No remaining test was weakened.
 
@@ -53,7 +55,7 @@ Each receipt is separate. The host receipt comes from a real VS Code run, not fr
 - Screen reader output, high contrast themes, contrast of graphics.
 - A real task list record of either provider: none was found on this machine on 12 November, so progress is tested on synthetic records only and read "Unavailable" for real sessions then. Not rechecked since.
 - Structured Codex file edits: local Codex sessions use program text inside `exec`, so their footprint reads empty.
-- The packaged VSIX installed in an editor. The host check runs the checkout, and `package:check` proves the packaged files equal it.
+- The installed `0.2.0` on real sessions. It is installed in the normal VS Code profile; nobody has opened it there yet. The host check runs the checkout, and `package:check` proves the packaged files equal it.
 - The copy to clipboard in the default host run (it passed once in S09 with `--clipboard`).
 - The cause of the one failed browser run above.
 
@@ -76,10 +78,11 @@ All are in the README limits.
 
 ### Decisions waiting for you
 
-1. **Install.** Put `agent-viz-0.2.0.vsix` in your normal VS Code and use it on real sessions (roadmap Phase 2).
-2. **Empty panels.** Task progress and Codex file activity read empty for real sessions on this PC. Codex App Server may fix the second (roadmap Phase 4); the first has no fix yet.
-3. **The Station Observatory.** You chose it on 12 November. Its prototype, research report, brief and eleven-step plan are only in the main folder and not in Git (seen 15 November). Commit them, then refresh and launch the plan (roadmap Phases 1 and 3). The eight concept pages (`docs/concepts/index.html`) are material for it.
-4. **Data sources.** The research of 14 November (`docs/research/2026-11-14-provider-sdk-architecture.md`, also main folder only) recommends testing Codex App Server, then Claude's session utilities (roadmap Phase 4).
+1. **Use it.** `0.2.0` is installed. Reload VS Code, open AgentViz from the activity bar, and follow a real session for a few days. Note what you look at and what is missing.
+2. **Launch the Station Observatory plan.** You chose the Station Observatory on 12 November. Its prototype, research, brief and plan are in Git since 15 November (`bb0334e`), and the plan and brief were refreshed the same day for details on click, the eight concept pages and the data research. In AgentBoard: **Run a Plan**, **Station Observatory: inspectable session world**. Eleven steps; it builds a prototype on synthetic data and ends with a written spec for wiring it to real data.
+3. **Data sources.** The research of 14 November (`docs/research/2026-11-14-provider-sdk-architecture.md`) recommends testing Codex App Server, then Claude's session utilities. Not started. It may fix the empty Codex file activity.
+4. **Task progress** reads "Unavailable" for real sessions on this PC (recorded 12 November, not rechecked). No fix is known.
+5. **Push.** One local commit, the plan refresh, is not on `origin`.
 
 ### Where the earlier history is
 
