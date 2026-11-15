@@ -1,5 +1,15 @@
 # Mock-up verification
 
+## Animated Station Observatory follow-up, 12 November 2026
+
+`station.html` is the selected direction developed into an animated synthetic prototype. `node --check docs/ui-exploration/station.js` and `python docs/ui-exploration/verify-station.py` passed. The retained browser self-check uses installed Python Playwright and Microsoft Edge, with an isolated browser that closes in a finally block. Chrome's headless launch exited before creating a page on this machine, so this follow-up was verified in Edge.
+
+Verified: playback advances a single 42-event fixture and emits animated signals; Pause stops advancement and clears signals; counts and error totals remain consistent at six timeline positions; all six SVG stations work with Enter; resources drill down to calls; event dialogs expose inputs and outputs; API 429 and test-failure payloads can be traversed; Escape restores focus; resource exploration clears the errors-only filter; flat view, empty state, speed, reduced motion, and 768/390-pixel layouts work. No JavaScript errors or HTTP/HTTPS requests were observed. Desktop, API-error and narrow-layout screenshots were visually inspected and retained under the ignored `artifacts/station-prototype` directory.
+
+The station prototype uses HTML, CSS and JavaScript, with no new project dependency. It is separate from the original static comparison gallery described below. It has not been connected to real transcripts or integrated into the VS Code webview; production handling of sensitive inputs and outputs remains undesigned. The extension tests were not rerun for these documentation-only files.
+
+## Original comparison gallery
+
 Checked 12 November 2026 in Chrome using the local `index.html` file.
 
 | Check | Observed result |

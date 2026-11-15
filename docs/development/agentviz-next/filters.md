@@ -1,5 +1,7 @@
 # S02 receipt: workspace, name and ID filtering (parallel plan)
 
+> **Since this receipt (15 November 2026):** the frozen request form it added to `media/app.js` was removed, because no host ever answered in it. The README test it reports as failing passes. Three of its tests are kept in `test/app.test.js`. See `../agentviz-next-parallel-run.md`.
+
 Card 280712, branch `task/280712`, plan card 6e96a7. Written 2026-11-12. Code commit: `67d8ed5`.
 
 ## Starting state found

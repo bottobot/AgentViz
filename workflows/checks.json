@@ -21,7 +21,12 @@
   },
   "package": {
     "run": "npm run package",
-    "what": "Build a local AgentViz VSIX using the locked development tool. Does not install, publish or push it. Inspect the archive separately.",
+    "what": "Build a local AgentViz VSIX using the locked development tool. Does not install, publish or push it. Inspect the archive with package-check.",
     "minutes": 2
+  },
+  "package-check": {
+    "run": "npm run package:check",
+    "what": "Reads the VSIX built by package and fails on an unexpected, missing or duplicate file, a local path inside any file, runtime dependencies, or a file that differs from the checkout. Run package first; a missing VSIX is a failure. Does not install the package.",
+    "minutes": 1
   }
 }

@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentViz · Station Observatory</title>
+  <link rel="stylesheet" href="station.css">
+  <script src="station.js" defer></script>
+</head>
+<body>
+  <header class="topbar"><a href="#" id="home" class="brand">◈ <strong>AgentViz</strong><span> / Station Observatory</span></a><span class="demo-badge">SYNTHETIC SESSION · INTERACTIVE PROTOTYPE</span></header>
+  <main>
+    <section class="heading"><div><p class="eyebrow">Every signal has a story</p><h1>Watch the work. Follow the detail.</h1><p>Choose a station, follow a resource, then open a call to inspect its inputs and outputs.</p></div><div class="session-id"><span>DEMO / CODEX</span><strong>Build a session explorer</strong><small>Invented payloads · no real files or services accessed</small></div></section>
+    <section class="transport" aria-label="Playback controls">
+      <button id="play" class="primary">Pause</button><button id="restart" title="Restart the synthetic session">↺ Restart</button>
+      <label class="speed">Speed <select id="speed"><option value="1">1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
+      <div class="scrubber"><label for="position">Session timeline <output id="position-label"></output></label><input id="position" type="range" min="0" max="42" value="12"></div>
+      <label class="motion"><input type="checkbox" id="motion" checked> Animate signals</label><span id="playback-state" class="state">Playing example</span>
+    </section>
+    <div class="workspace">
+      <section class="world-panel" aria-label="Station landscape">
+        <div class="world-heading"><div><p class="eyebrow">Activity landscape</p><h2 id="world-title">The whole session</h2></div><div class="world-actions"><button id="reset-view">Overview</button><label>View <select id="view"><option value="isometric">Isometric</option><option value="flat">Flat map</option></select></label></div></div>
+        <div class="scene">
+          <svg id="landscape-svg" viewBox="0 0 1000 650" aria-label="Interactive tool stations. Equivalent station buttons are below.">
+            <defs>
+              <pattern id="grid" width="50" height="30" patternUnits="userSpaceOnUse"><path d="M0 15L25 0L50 15L25 30Z" fill="none" stroke="#26424d" stroke-width=".65"/></pattern>
+              <radialGradient id="ground"><stop stop-color="#193b45"/><stop offset="1" stop-color="#0d1b25"/></radialGradient>
+              <filter id="signal-glow"><feGaussianBlur stdDeviation="4"/></filter>
+            </defs>
+            <g class="world-floor"><path d="M40 325L500 60L960 325L500 590Z" fill="url(#ground)" stroke="#36515b"/><path d="M40 325L500 60L960 325L500 590Z" fill="url(#grid)"/><path d="M40 325V340L500 605L960 340V325L500 590Z" fill="#101e29" stroke="#304750"/></g>
+            <g id="connections"></g>
+            <g class="hub" transform="translate(500 325)"><ellipse cx="0" cy="26" rx="76" ry="35" fill="#0005"/><path d="M-67 0L0-39L67 0V26L0 65L-67 26Z" fill="#2e5762" stroke="#7fadb4"/><path d="M-67 0L0-39L67 0L0 39Z" fill="#d1ece3"/><text id="hub-count" y="8">12</text><text class="hub-caption" y="94">RECORDED CALLS</text><circle class="hub-beacon" cy="-53" r="5" fill="#a4f2cb"/></g>
+            <g id="stations"></g><g id="signals" aria-hidden="true"></g>
+          </svg>
+          <div class="scene-caption"><span>Fixed positions · height is decorative</span><span>Moving signals = recorded example events</span></div>
+        </div>
+        <nav id="station-list" aria-label="Choose a station"></nav>
+        <div class="summary-strip"><span><b id="total">12</b> calls</span><button id="errors">0 errors ↗</button><span><b id="resource-total">0</b> resources</span><span id="context">Context not yet reported</span></div>
+      </section>
+      <aside class="inspector" aria-label="Station inspector">
+        <div class="inspector-head"><p class="eyebrow" id="inspector-kicker">Session overview</p><h2 id="inspector-title">Follow a signal.</h2><p id="inspector-description">All stations, one session. Select a resource or open an event below.</p></div>
+        <div class="inspector-stats"><div><strong id="selection-count">12</strong><span>calls in view</span></div><div><strong id="selection-errors">0</strong><span>recorded errors</span></div><div><strong id="selection-duration">0</strong><span>total call time*</span></div></div>
+        <p class="tiny">*Sum of synthetic call durations, not session elapsed time.</p>
+        <div class="inspector-section"><div class="section-label"><h3>Explore resources</h3><button id="clear-resource" hidden>Clear selection ×</button></div><div id="resources" class="resources"></div></div>
+        <div class="inspector-section"><div class="section-label"><h3>Calls & outcomes</h3><label class="error-filter"><input id="only-errors" type="checkbox"> Errors only</label></div><p id="filter-description" class="tiny"></p><div id="events" class="events"></div></div>
+      </aside>
+    </div>
+    <section class="event-ribbon"><div class="section-label"><h2>Session trail</h2><span id="trail-caption">Click a recorded event to inspect it</span></div><div id="trail" class="trail" aria-label="Recorded event trail"></div><div class="trail-legend"><span>F Files</span><span>E Edits</span><span>S Shell</span><span>N Network</span><span>A Agents</span><span>M Memory</span><span>! Error</span></div></section>
+    <p class="footer-note">All names, API payloads, errors and outputs are invented. No live transcript connection. Original privacy rules for the extension remain unchanged. <span id="motion-note"></span></p>
+    <noscript>This interactive prototype needs JavaScript enabled.</noscript>
+  </main>
+  <dialog id="event-dialog" aria-labelledby="detail-title">
+    <div class="dialog-heading"><div><p class="eyebrow" id="detail-category"></p><h2 id="detail-title"></h2></div><button id="close-detail" aria-label="Close event details">×</button></div>
+    <p id="detail-summary"></p><dl id="detail-meta" class="detail-meta"></dl>
+    <div class="payloads"><section><h3>Input <span>SYNTHETIC</span></h3><pre id="detail-input" tabindex="0"></pre></section><section><h3>Output <span>SYNTHETIC</span></h3><pre id="detail-output" tabindex="0"></pre></section></div>
+    <p id="detail-caution" class="caution" hidden>A recorded error remains an error. A later success does not prove this failure was fixed.</p>
+    <div class="dialog-footer"><button id="previous-event">← Previous in view</button><button id="next-event">Next in view →</button><button id="related-resource" class="primary">Explore this resource ↗</button></div>
+  </dialog>
+</body>
+</html>

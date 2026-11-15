@@ -1,5 +1,7 @@
 # S01 receipt: workspaces and saved session names (parallel plan)
 
+> **Since this receipt (15 November 2026):** the frozen query form it added was removed, because the join step never ran. The README test it reports as failing passes. Its end to end test of both providers is kept in `test/metadata.test.js`. See `../agentviz-next-parallel-run.md`.
+
 Card `5c588b`, branch `task/5c588b`, AgentBoard worktree. Plan card `6e96a7`. Base: `a9f9799`. Written 12 November 2026.
 
 ## Headline

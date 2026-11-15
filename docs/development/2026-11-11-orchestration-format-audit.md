@@ -1,5 +1,7 @@
 # AgentViz Run a Plan format audit
 
+> **Since this audit (15 November 2026):** the parallel plan was launched after all, in part, and its plan file is now in `workflows/archive/`. See `agentviz-next-parallel-run.md`. The findings about the plan file format still hold.
+
 Date: 11 November 2026. Scope: discovery, schema, dependency expansion and generated prompts for this workflow against the current local AgentBoard source. This audit supersedes the earlier manual orchestrator recommendation, which did not satisfy the requested Run a Plan entry point.
 
 ## Verdict

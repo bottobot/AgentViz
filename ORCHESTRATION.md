@@ -1,5 +1,7 @@
 # AgentViz next phase implementation plan
 
+> **Status, 15 November 2026: delivered. This is history.** All ten outcomes below are built and merged. The parallel plan file is in `workflows/archive/`; do not launch either plan again. The "Parallel interface contract" below was never completed and its request format was removed from the code. For the current state read `HANDOFF.md` and `docs/ROADMAP.md`; the "Product contract" section is still a fair description of how the session filters must behave.
+
 **Goal:** Make long coding sessions easy to find by project or workspace, then session name, then session ID, and easy to follow through truthful activity, agent lanes, task progress and file activity.
 
 **Execution:** In AgentBoard, choose Run a Plan and select `AgentViz: parallel find and follow sessions` from `workflows/agentviz-next.parallel.plan.json`. That schema compliant file is the executable schedule. This Markdown is the supporting product brief; it does not instruct workers to create cards or submit another orchestrator plan.

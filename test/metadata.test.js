@@ -1,5 +1,5 @@
-// S01 (parallel plan): workspace, saved name and ID metadata from both providers, carried to the webview through
-// the frozen interface of ORCHESTRATION.md ("Parallel interface contract"). Synthetic fixtures only.
+// Workspace, saved name and ID metadata from both providers, carried from transcript files to the webview through
+// the real discovery and the real host whitelist. Synthetic fixtures only.
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -9,8 +9,7 @@ const vm = require('node:vm');
 const { createSession } = require('../src/transcript');
 const realSessions = require('../src/sessions');
 
-const flush = () => new Promise(resolve => setImmediate(resolve));
-// 	ick stands in for the host's one-second timer, which the stand-in VS Code does not run.
+// `tick` stands in for the host's one-second timer, which the stand-in VS Code does not run.
 async function until(check, label, tick) {
   for (let turn = 0; turn < 400; turn++) {
     if (check()) return;
@@ -20,7 +19,7 @@ async function until(check, label, tick) {
   assert.fail(`timed out waiting for: ${label}`);
 }
 
-// The extension host with a stand-in VS Code. `discoverSessions` is a stub, or the real one over fixture folders.
+// The extension host with a stand-in VS Code, over the real `discoverSessions` and fixture folders.
 function host(discoverSessions, root = 'synthetic-root') {
   const callbacks = {};
   const messages = [];
@@ -51,134 +50,6 @@ function host(discoverSessions, root = 'synthetic-root') {
 }
 
 const CATALOGUE_FIELDS = ['child', 'id', 'modified', 'name', 'nameSource', 'project', 'provider', 'sessionId', 'workspaceKey', 'workspaceLabel'];
-const WS_A = `ws:${'a'.repeat(20)}`;
-const entry = (id, extra = {}) => ({ id, sessionId: `${id}-full-id`, provider: 'claude', project: 'Example', child: false, modified: 1, file: `C:/PRIVATE_PATH/${id}.jsonl`,
-  workspaceKey: WS_A, workspaceLabel: 'Example', name: `Name of ${id}`, nameSource: 'custom', ...extra });
-const answer = sessions => ({ sessions, kept: [], warnings: [], all: sessions, total: sessions.length, matched: sessions.length, limit: 80,
-  workspaces: [{ key: WS_A, label: 'Example', count: sessions.length, cwd: 'C:/PRIVATE_PATH/Example' }], pending: { workspaces: 0, names: 0 }, walk: { files: sessions, warnings: [] } });
-
-// SPEC: frozen interface, inbound half. {type:"query", requestId, workspaceKey, name, sessionId} is accepted and
-// acknowledged in the existing `lookup.seq`. The top-level `queryRequestId` is NOT sent yet: test/resilience.test.js
-// pins the exact fields of a host message and belongs to the joining discovery step (see the receipt).
-test('the frozen query message reaches discovery and the state acknowledges its request number', async () => {
-  const calls = [];
-  const instance = host((roots, options) => { calls.push(options); return Promise.resolve(answer([entry('claude:one')])); });
-  instance.send({ type: 'ready' });
-  await flush();
-  let message = instance.messages.at(-1);
-  assert.equal(message.lookup.seq, 0, 'before any query the acknowledged ID is zero');
-  assert.deepEqual(message.workspaces.map(group => [group.key, group.label]), [[WS_A, 'Example']]);
-  assert.deepEqual(Object.keys(message.sessions[0]).sort(), CATALOGUE_FIELDS);
-  for (const field of ['id', 'sessionId', 'provider', 'workspaceKey', 'workspaceLabel', 'name', 'nameSource']) assert.equal(typeof message.sessions[0][field], 'string', field);
-  assert.deepEqual([typeof message.sessions[0].modified, typeof message.sessions[0].child], ['number', 'boolean']);
-
-  const fullId = '11111111-2222-4333-8444-555555555555';
-  instance.send({ type: 'query', requestId: 1, workspaceKey: WS_A, name: 'Login', sessionId: fullId });
-  await flush();
-  assert.deepEqual([calls.at(-1).query.workspaceKey, calls.at(-1).query.name, calls.at(-1).query.id], [WS_A, 'Login', fullId], 'the whole session ID is the ID filter');
-  assert.equal(instance.messages.at(-1).lookup.seq, 1);
-
-  // Empty filter values mean unfiltered and are a valid request.
-  instance.send({ type: 'query', requestId: 2, workspaceKey: '', name: '', sessionId: '' });
-  await flush();
-  assert.deepEqual([calls.at(-1).query.workspaceKey, calls.at(-1).query.name, calls.at(-1).query.id], ['', '', '']);
-  assert.equal(instance.messages.at(-1).lookup.seq, 2);
-
-  // A request numbered at or below the last accepted one arrived late: it changes nothing.
-  const count = calls.length;
-  instance.send({ type: 'query', requestId: 1, workspaceKey: '', name: 'late', sessionId: '' });
-  instance.send({ type: 'query', requestId: 2, workspaceKey: '', name: 'repeat', sessionId: '' });
-  await flush();
-  instance.tick();
-  await flush();
-  assert.equal(calls.length, count);
-  assert.equal(instance.messages.at(-1).lookup.seq, 2);
-  assert.doesNotMatch(JSON.stringify(instance.messages), /PRIVATE_|\.jsonl/);
-  instance.close();
-});
-
-test('malformed frozen queries are rejected whole at the host boundary', async () => {
-  const calls = [];
-  const instance = host((roots, options) => { calls.push(options); return Promise.resolve(answer([entry('claude:one')])); });
-  instance.send({ type: 'ready' });
-  await flush();
-  instance.send({ type: 'query', requestId: 3, workspaceKey: '', name: 'accepted', sessionId: '' });
-  await flush();
-  const count = calls.length;
-  const good = { type: 'query', requestId: 9, workspaceKey: '', name: 'PRIVATE_REJECTED', sessionId: '' };
-  const malformed = [
-    { ...good, requestId: -1 }, { ...good, requestId: 4.5 }, { ...good, requestId: '9' }, { ...good, requestId: null }, { ...good, requestId: Number.MAX_SAFE_INTEGER + 2 },
-    { ...good, workspaceKey: 'C:/PRIVATE_PATH' }, { ...good, workspaceKey: 7 }, { ...good, workspaceKey: undefined },
-    { ...good, name: ['PRIVATE_REJECTED'] }, { ...good, name: { toString: () => 'PRIVATE_REJECTED' } }, { ...good, name: undefined },
-    { ...good, sessionId: 12345678 }, { ...good, sessionId: null },
-    { type: 'query', requestId: 9 }
-  ];
-  for (const message of malformed) instance.send(message);
-  await flush();
-  instance.tick();
-  await flush();
-  assert.equal(calls.length, count, 'no malformed request starts a lookup');
-  assert.equal(instance.messages.at(-1).lookup.seq, 3, 'and none is acknowledged');
-  assert.ok(calls.every(call => call.query.name !== 'PRIVATE_REJECTED'));
-
-  // Filter text is bounded before discovery sees it; the request itself is still valid.
-  instance.send({ type: 'query', requestId: 10, workspaceKey: 'ws:unknown', name: 'n'.repeat(500), sessionId: 'x'.repeat(500) });
-  await flush();
-  assert.deepEqual([calls.at(-1).query.workspaceKey, calls.at(-1).query.name.length, calls.at(-1).query.id.length], ['ws:unknown', 200, 200]);
-  assert.equal(instance.messages.at(-1).lookup.seq, 10);
-  instance.close();
-});
-
-test('a reloaded view restarts its numbering, and the earlier seq form is still answered', async () => {
-  const calls = [];
-  const instance = host((roots, options) => { calls.push(options); return Promise.resolve(answer([entry('claude:one')])); });
-  instance.send({ type: 'ready' });
-  await flush();
-  instance.send({ type: 'query', requestId: 7, workspaceKey: '', name: 'before reload', sessionId: '' });
-  await flush();
-  assert.equal(instance.messages.at(-1).lookup.seq, 7);
-  // A reloaded view may hand over its remembered filters with `ready`, in the frozen form.
-  instance.send({ type: 'ready', query: { requestId: 0, workspaceKey: WS_A, name: 'kept', sessionId: '' } });
-  await flush();
-  assert.deepEqual([calls.at(-1).query.workspaceKey, calls.at(-1).query.name, instance.messages.at(-1).lookup.seq], [WS_A, 'kept', 0]);
-  instance.send({ type: 'query', requestId: 1, workspaceKey: '', name: 'after reload', sessionId: '' });
-  await flush();
-  assert.deepEqual([calls.at(-1).query.name, instance.messages.at(-1).lookup.seq], ['after reload', 1]);
-  // A malformed query beside `ready` is dropped; the view still gets an unfiltered answer.
-  instance.send({ type: 'ready', query: { requestId: 'PRIVATE_ID', workspaceKey: WS_A, name: 'PRIVATE_NAME', sessionId: '' } });
-  await flush();
-  assert.deepEqual([calls.at(-1).query.workspaceKey, calls.at(-1).query.name, instance.messages.at(-1).lookup.seq], ['', '', 0]);
-
-  // Legacy form, kept until the joining discovery step retires it: seq and id, answered in lookup.seq.
-  instance.send({ type: 'query', seq: 4, workspaceKey: '', name: 'legacy', id: 'abc' });
-  await flush();
-  assert.deepEqual([calls.at(-1).query.name, calls.at(-1).query.id, instance.messages.at(-1).lookup.seq], ['legacy', 'abc', 4]);
-  assert.doesNotMatch(JSON.stringify(instance.messages), /PRIVATE_/);
-  instance.close();
-});
-
-test('a catalogue worked out for an older request is never acknowledged as the newest one', async () => {
-  const pending = [];
-  const instance = host((roots, options) => new Promise(resolve => { pending.push({ options, resolve }); }));
-  instance.send({ type: 'ready' });
-  await flush();
-  pending[0].resolve(answer([entry('claude:first')]));
-  await flush();
-  assert.equal(instance.messages.at(-1).lookup.seq, 0);
-  instance.send({ type: 'query', requestId: 1, workspaceKey: '', name: 'one', sessionId: '' });
-  await flush();
-  instance.send({ type: 'query', requestId: 2, workspaceKey: '', name: 'two', sessionId: '' });
-  pending[1].resolve(answer([entry('claude:answer-to-one')]));
-  await flush();
-  assert.ok(instance.messages.every(message => message.lookup.seq !== 2), 'the answer to request 1 is not shown as the answer to request 2');
-  instance.tick();
-  await flush();
-  assert.equal(pending[2].options.query.name, 'two');
-  pending[2].resolve(answer([entry('claude:answer-to-two')]));
-  await flush();
-  assert.deepEqual([instance.messages.at(-1).lookup.seq, instance.messages.at(-1).sessions.map(session => session.id)], [2, ['claude:answer-to-two']]);
-  instance.close();
-});
 
 // SPEC: S01 acceptance. Both providers carry tested workspace/name/ID metadata to the webview from transcript
 // files, through the real discovery and the real host whitelist, and private payload sentinels stay absent.
@@ -255,8 +126,8 @@ test('both providers carry workspace, saved name and full ID from transcript fil
   assert.equal(by('sameDirectory').name, by('renamed').name);
   assert.notEqual(by('sameDirectory').id, by('renamed').id);
 
-  // The frozen query: project, name and a fragment from the far end of the ID intersect.
-  instance.send({ type: 'query', requestId: 1, workspaceKey: by('renamed').workspaceKey, name: 'chosen', sessionId: '000000000001' });
+  // A filter request: project, name and a fragment from the far end of the ID intersect.
+  instance.send({ type: 'query', seq: 1, workspaceKey: by('renamed').workspaceKey, name: 'chosen', id: '000000000001' });
   await until(() => instance.messages.at(-1).lookup.seq === 1, 'the answer to request 1', instance.tick);
   assert.deepEqual(instance.messages.at(-1).sessions.map(session => session.sessionId), [ids.renamed]);
 
@@ -264,7 +135,7 @@ test('both providers carry workspace, saved name and full ID from transcript fil
   const identity = { id: by('renamed').id, sessionId: by('renamed').sessionId, workspaceKey: by('renamed').workspaceKey };
   await fs.promises.appendFile(claude('C--Work-Example', ids.renamed), `${JSON.stringify({ type: 'custom-title', customTitle: 'Renamed late', sessionId: ids.renamed })}\n`);
   instance.send({ type: 'refresh' });
-  instance.send({ type: 'query', requestId: 2, workspaceKey: '', name: 'renamed late', sessionId: '' });
+  instance.send({ type: 'query', seq: 2, workspaceKey: '', name: 'renamed late', id: '' });
   await until(() => instance.messages.at(-1).lookup.seq === 2 && instance.messages.at(-1).sessions.length === 1, 'the renamed session', instance.tick);
   const renamed = instance.messages.at(-1).sessions[0];
   assert.deepEqual([renamed.name, renamed.nameSource, renamed.id, renamed.sessionId, renamed.workspaceKey], ['Renamed late', 'custom', identity.id, identity.sessionId, identity.workspaceKey]);
