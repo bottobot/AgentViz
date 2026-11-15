@@ -58,6 +58,7 @@ Each receipt is separate. The host receipt comes from a real VS Code run, not fr
 - The installed `0.2.0` on real sessions. It is installed in the normal VS Code profile; nobody has opened it there yet. The host check runs the checkout, and `package:check` proves the packaged files equal it.
 - The copy to clipboard in the default host run (it passed once in S09 with `--clipboard`).
 - The cause of the one failed browser run above.
+- The cause of one failed unit run. On 15 November the test "Refresh recovers an edit between the rewrite samples" (`test/resilience.test.js`) failed once in a full `npm test`, on a change that touched only documents. It passed in the next four full runs and in eight runs of its own file. The failure message was not captured. Treat it as an intermittent, timing-sensitive test until someone finds out.
 
 ### Deferred
 
@@ -80,7 +81,7 @@ All are in the README limits.
 
 1. **Use it.** `0.2.0` is installed. Reload VS Code, open AgentViz from the activity bar, and follow a real session for a few days. Note what you look at and what is missing.
 2. **Launch the Station Observatory plan.** You chose the Station Observatory on 12 November. Its prototype, research, brief and plan are in Git since 15 November (`bb0334e`), and the plan and brief were refreshed the same day for details on click, the eight concept pages and the data research. In AgentBoard: **Run a Plan**, **Station Observatory: inspectable session world**. Eleven steps; it builds a prototype on synthetic data and ends with a written spec for wiring it to real data.
-3. **Data sources.** The research of 14 November (`docs/research/2026-11-14-provider-sdk-architecture.md`) recommends testing Codex App Server, then Claude's session utilities. Not started. It may fix the empty Codex file activity.
+3. **Data sources.** The research of 14 November (`docs/research/2026-11-14-provider-sdk-architecture.md`) recommends testing Codex App Server, then Claude's session utilities. A read-only plan for it is prepared and not launched: **Run a Plan**, **Data sources: test Codex App Server and Claude SDK reads** (`workflows/data-source-experiments.plan.json`, brief `docs/handoffs/2026-11-15-data-source-experiments.md`). It may fix the empty Codex file activity. Its preview has one setting, `real_samples`: how many real transcripts per provider it may copy into a temporary folder.
 4. **Task progress** reads "Unavailable" for real sessions on this PC (recorded 12 November, not rechecked). No fix is known.
 
 ### Where the earlier history is

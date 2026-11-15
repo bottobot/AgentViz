@@ -1,0 +1,204 @@
+{
+  "v": 1,
+  "name": "Data sources: test Codex App Server and Claude SDK reads",
+  "about": "Read-only experiments on temp homes: do Codex App Server history reads and Claude session utilities give better data than transcripts? Ends with a report, a verdict per interface and a drafted live experiment. No model usage, no product change.",
+  "review": "model",
+  "reviewer": {
+    "model": "opus",
+    "effort": "high"
+  },
+  "model": "opus",
+  "effort": "high",
+  "judge": "opus",
+  "vars": {
+    "real_samples": "3"
+  },
+  "steps": [
+    {
+      "id": "survey",
+      "title": "Survey: exact Codex App Server and Claude SDK read interfaces",
+      "effort": "medium",
+      "source": "docs/handoffs/2026-11-15-data-source-experiments.md",
+      "goal": "Establish the facts the experiments depend on, from the installed tools and the published package. Change no product file. Start no server and install nothing.\n\n1. Codex. Record codex --version. Run codex app-server --help and the help of generate-json-schema, then generate the JSON Schema into artifacts/data-sources/codex-schema/ (ignored by Git). From the schema list every request method and mark the ones that only read (listing threads, reading a thread, its turns and its items, under their current names), with their parameters (paging, any option that avoids scanning or repairing logs), the opening handshake and the notification types. You may run codex app-server --print-startup-config with the Codex home variable set to an empty temp folder; record key names only. Find how the Codex home is chosen (the environment variable) and cite where you read it.\n2. Claude. Find the Agent SDK package and its current version with npm view. Fetch it with npm pack into a temp folder outside the repository, unpack it, and read its type definitions without installing or running it. Record the exact signatures for listing sessions, reading a session's messages and reading subagent history: options (folder, limit, paging), return fields, and how the config folder is chosen. Read enough of its source to say whether those functions start a process, open a network connection, need credentials or write a file.\n3. Read the official pages cited in docs/research/2026-11-14-provider-sdk-architecture.md for both providers. Where a page and the installed version disagree, the installed version wins; record the disagreement.\n4. Write docs/development/data-sources/survey.md: each fact with its source (command and output, schema file, file and line in the unpacked package, or URL), then a list of what you could not confirm. The two experiment steps will rely on this file alone, so name every method, option and variable exactly.\n\nRemove the temp folders you made. Rules: the ten hard rules in the brief apply to every command you run. In short: no model usage, no credentials, no login or sign-out, never write under the real Codex home or Claude config folder, real data as key names, types and counts only, stop only processes you started, a blocker is a finding. Run a Plan worker; do not open cards, request plan approval or call finish self. Subagents only opus at effort medium or haiku at effort max. Never call something passed unless you ran it. Commit.",
+      "files": [
+        "docs/development/data-sources/survey.md"
+      ],
+      "avoid": [
+        "src/",
+        "media/",
+        "test/",
+        "package.json",
+        "package-lock.json",
+        ".vscodeignore",
+        "README.md",
+        "HANDOFF.md",
+        "ORCHESTRATION.md",
+        "workflows/",
+        ".agentboard/",
+        "AgentViz.code-workspace",
+        "docs/concepts/",
+        "docs/ui-exploration/",
+        "experiments/"
+      ],
+      "checks": [
+        "syntax",
+        "unit"
+      ],
+      "reply": "The commit id, the survey.md path, the read methods and functions found with their exact names, the home and config variables, and anything not confirmed."
+    },
+    {
+      "id": "harness",
+      "title": "Harness: temp homes, synthetic fixture, baseline and comparison",
+      "source": "docs/handoffs/2026-11-15-data-source-experiments.md",
+      "goal": "Build the shared pieces under experiments/data-sources/ so the two experiment steps can run side by side without editing a common file. Start no Codex server and install no SDK here.\n\n1. lib.js: makeTempHome(prefix) under the system temp folder, named agentviz-ds-*, refusing any path inside the real Codex home, the real Claude config folder or this repository; removeTempHome, which refuses anything it did not make; hashTree(folder) giving relative path, size and SHA-256, and diffTrees for side-effect checks; a reporter that prints key names, value types and counts, and refuses a string longer than 40 characters unless it is marked synthetic; runChild(command, args, env, timeoutMs) that records the PID, enforces the timeout and stops only that PID.\n2. fixtures.js: write the synthetic sources listed under 'The fixture' in the brief, for both providers, into a temp home. Use the helpers in test/resilience-fixture.js where they fit: require that file, do not edit it. Private parts carry PRIVATE_ sentinels. Timestamps are fixed.\n3. baseline.js: run the product's own readers (discoverSessions, TranscriptReader and FamilyReader from src/sessions.js, required read-only) over a home and write the normalized result to artifacts/data-sources/baseline.json: per session its identity, name and name source, workspace key, lanes and parent links; per call its id, kind, outcome, start time, the end time where the reader keeps one, and file identities. It takes the home folder as an argument, so the experiment steps can also point it at a temp home holding copied real samples.\n4. compare.js: given a baseline and a candidate in the same shape, print for each field how many are equal, only in the baseline, only in the candidate, or different, with at most five synthetic examples. An empty or missing candidate is reported as 'did not run' with a non-zero exit, never as 'no differences'.\n5. lib.test.js, run with node --test experiments/data-sources/lib.test.js: the temp home refusals, hashTree noticing one changed byte, the reporter refusing a long unmarked string, compare reporting an empty candidate as not run, runChild stopping only its own child. README.md: what each script does and how to run it.\n\nRun node --check on every script, the test above, and baseline.js on the fixture; quote the outputs. Receipt: docs/development/data-sources/harness.md, with the shape of baseline.json written out so the experiment steps can produce the same shape.\n\nRules: the ten hard rules in the brief apply to every command you run. In short: no model usage, no credentials, no login or sign-out, never write under the real Codex home or Claude config folder, real data as key names, types and counts only, stop only processes you started, a blocker is a finding. Run a Plan worker; do not open cards, request plan approval or call finish self. Subagents only opus at effort medium or haiku at effort max. Never call something passed unless you ran it. Commit.",
+      "files": [
+        "experiments/data-sources/lib.js",
+        "experiments/data-sources/fixtures.js",
+        "experiments/data-sources/baseline.js",
+        "experiments/data-sources/compare.js",
+        "experiments/data-sources/lib.test.js",
+        "experiments/data-sources/README.md",
+        "docs/development/data-sources/harness.md"
+      ],
+      "avoid": [
+        "src/",
+        "media/",
+        "test/",
+        "package.json",
+        "package-lock.json",
+        ".vscodeignore",
+        "README.md",
+        "HANDOFF.md",
+        "ORCHESTRATION.md",
+        "workflows/",
+        ".agentboard/",
+        "AgentViz.code-workspace",
+        "docs/concepts/",
+        "docs/ui-exploration/"
+      ],
+      "checks": [
+        "syntax",
+        "unit"
+      ],
+      "reply": "The commit id, the files written, the exact output of node --check, lib.test.js and baseline.js, the baseline shape, and anything left undone."
+    },
+    {
+      "id": "codex-history",
+      "title": "Experiment: Codex App Server history reads on a temp home",
+      "after": [
+        "survey",
+        "harness"
+      ],
+      "judge": true,
+      "source": "docs/handoffs/2026-11-15-data-source-experiments.md",
+      "goal": "Answer questions C1 to C8 in the brief by experiment. Read docs/development/data-sources/survey.md and harness.md first and use the method names, options and variable names they give. Edit only experiments/data-sources/codex-history.js, codex-normalize.js and your receipt.\n\n1. Start codex app-server as a stdio child through lib.runChild, with the Codex home variable set to a temp home holding the synthetic fixture. No daemon, no proxy, no port, no --startup-sign-out, no login. Speak the handshake from the generated schema. Call read methods only: never start a turn, send input, resume, fork, archive, rename or delete.\n2. Hash the temp home before and after every method call. Report each file the server created or changed, and show that the rollout files are byte-identical at the end.\n3. Turn what the server returns into the baseline shape (codex-normalize.js) and run compare.js against the baseline of the same home. Answer C1 to C8 one by one.\n4. Real samples. If {{real_samples}} is above 0, copy at most that many real rollout files (newest first, under 20 MB each, one of them a thread that has a child if one exists) from the real Codex sessions folder into a second temp home, and repeat steps 1 to 3 there. Copy rollout files only: no auth file, configuration, SQLite state or session index. Print key names, types and counts only. This is the only way to answer C4 for real sessions: say plainly whether real edits appear as structured file changes with a path, and how many of how many.\n5. If the server will not start, asks for a login, needs the network or cannot see history it did not write, that is the finding. Record the exact message, mark the questions it blocks as not tested, and stop that branch. Do not point the server at the real home.\n6. Stop the child by its PID and confirm it has exited. Remove both temp homes. Your script names the real Codex home only as the source of a file copy.\n\nReceipt docs/development/data-sources/codex-history.md: C1 to C8, each with its evidence (the command and the counts) or 'not tested' and why; the comparison table; side effects; time and memory to list and read; the Codex version. Run node --check on your scripts and quote the full summary output of one complete run.\n\nRules: the ten hard rules in the brief apply to every command you run. In short: no model usage, no credentials, no login or sign-out, never write under the real Codex home or Claude config folder, real data as key names, types and counts only, stop only processes you started, a blocker is a finding. Run a Plan worker; do not open cards, request plan approval or call finish self. Subagents only opus at effort medium or haiku at effort max. Never call something passed unless you ran it. Commit.",
+      "files": [
+        "experiments/data-sources/codex-history.js",
+        "experiments/data-sources/codex-normalize.js",
+        "docs/development/data-sources/codex-history.md"
+      ],
+      "avoid": [
+        "src/",
+        "media/",
+        "test/",
+        "package.json",
+        "package-lock.json",
+        ".vscodeignore",
+        "README.md",
+        "HANDOFF.md",
+        "ORCHESTRATION.md",
+        "workflows/",
+        ".agentboard/",
+        "AgentViz.code-workspace",
+        "docs/concepts/",
+        "docs/ui-exploration/",
+        "experiments/data-sources/lib.js",
+        "experiments/data-sources/fixtures.js",
+        "experiments/data-sources/baseline.js",
+        "experiments/data-sources/compare.js"
+      ],
+      "checks": [
+        "syntax",
+        "unit"
+      ],
+      "reply": "The commit id, the answer to each of C1 to C8 in one line, side effects found, whether real samples were used and how many, blockers, and what was not tested."
+    },
+    {
+      "id": "claude-history",
+      "title": "Experiment: Claude session utilities on a temp config folder",
+      "after": [
+        "survey",
+        "harness"
+      ],
+      "source": "docs/handoffs/2026-11-15-data-source-experiments.md",
+      "goal": "Answer questions L1 to L8 in the brief by experiment. Read docs/development/data-sources/survey.md and harness.md first and use the function names, options and variable names they give. Edit only experiments/data-sources/claude-history.js, claude-normalize.js and your receipt.\n\n1. Install the Agent SDK at the exact version the survey named into a temp folder outside the repository, with npm install --ignore-scripts. Never add it to this repository's package.json or node_modules. Record the version and the package integrity value.\n2. Point it at a temp config folder holding the synthetic fixture, using the variable or option from the survey. Call only the functions that list sessions, read a session's messages and read subagent history. Never call query(), never resume a session, never pass an API key.\n3. Hash the temp config folder before and after every call and report each file created or changed. Watch for child processes and network use while the calls run, and say how you checked.\n4. Turn what the functions return into the baseline shape (claude-normalize.js) and run compare.js against the baseline of the same folder. Answer L1 to L8 one by one. For L3, search every returned name, title and summary field for the PRIVATE_ sentinels and report which field, if any, carried prompt text.\n5. Real samples. If {{real_samples}} is above 0, copy at most that many real session transcripts with their subagents folders (newest first, under 20 MB each, one with subagents if one exists) into a second temp config folder and repeat steps 2 to 4 there. Copy transcript files only. Print key names, types and counts only.\n6. If a function needs credentials, the network or the real config folder, that is the finding. Record the exact message, mark the questions it blocks as not tested, and stop that branch.\n7. Remove the temp config folders and the temp SDK folder. Confirm no process you started is still running.\n\nReceipt docs/development/data-sources/claude-history.md: L1 to L8, each with its evidence or 'not tested' and why; the comparison table; side effects; time and memory; the SDK and Claude Code versions. Run node --check on your scripts and quote the full summary output of one complete run.\n\nRules: the ten hard rules in the brief apply to every command you run. In short: no model usage, no credentials, no login or sign-out, never write under the real Codex home or Claude config folder, real data as key names, types and counts only, stop only processes you started, a blocker is a finding. Run a Plan worker; do not open cards, request plan approval or call finish self. Subagents only opus at effort medium or haiku at effort max. Never call something passed unless you ran it. Commit.",
+      "files": [
+        "experiments/data-sources/claude-history.js",
+        "experiments/data-sources/claude-normalize.js",
+        "docs/development/data-sources/claude-history.md"
+      ],
+      "avoid": [
+        "src/",
+        "media/",
+        "test/",
+        "package.json",
+        "package-lock.json",
+        ".vscodeignore",
+        "README.md",
+        "HANDOFF.md",
+        "ORCHESTRATION.md",
+        "workflows/",
+        ".agentboard/",
+        "AgentViz.code-workspace",
+        "docs/concepts/",
+        "docs/ui-exploration/",
+        "experiments/data-sources/lib.js",
+        "experiments/data-sources/fixtures.js",
+        "experiments/data-sources/baseline.js",
+        "experiments/data-sources/compare.js"
+      ],
+      "checks": [
+        "syntax",
+        "unit"
+      ],
+      "reply": "The commit id, the answer to each of L1 to L8 in one line, whether any name field carried prompt text, side effects found, whether real samples were used and how many, blockers, and what was not tested."
+    },
+    {
+      "id": "verdict",
+      "title": "Verdict: report, one decision per interface, live experiment draft",
+      "after": [
+        "codex-history",
+        "claude-history"
+      ],
+      "judge": true,
+      "source": "docs/handoffs/2026-11-15-data-source-experiments.md",
+      "goal": "Write docs/research/data-source-experiments.md from the receipts in docs/development/data-sources/. First run both experiment scripts once yourself and quote their summary lines; where a rerun differs from a receipt, say so and trust neither until you know why.\n\n1. One table per interface: what it gives beyond transcripts, what it loses, side effects seen, cost, blockers.\n2. One row for each known gap in the brief (Codex file activity; end times with live events; a child's end for Codex; Claude context usage; task list progress): closed, partly closed, not closed or not tested, with the line of evidence.\n3. A verdict for each interface, exactly one of: adopt behind an adapter; keep transcripts only; cannot tell without a live test. Give the reason in two sentences. Apply the rule of the 14 November research: adopt only what improves fidelity or removes parser maintenance without losing coverage, and keep a transcript fallback.\n4. For a verdict of 'adopt', describe the adapter in prose: which function in src/sessions.js or src/transcript.js it sits beside, what it returns, how a live copy and a stored copy of one call are reconciled without counting it twice, how the privacy boundary holds (labels only in live events, detail read on request), what happens when the interface is missing or older, and the tests it needs. Write no code in src/.\n5. Draft the live-observation experiment in prose (step 2 of the research's 'Smallest useful validation'): the isolated setup, the events to capture, what it would spend in model usage, what could go wrong for Robert's own running sessions, and the decision he has to make. Do not write a plan file and do not run it.\n6. State plainly what the experiments did not cover.\n7. In docs/ROADMAP.md change only the 'Phase 4' section, to the result in five lines or fewer, and add this report to the ratings table.\n\nBefore you finish: confirm with git status that nothing under src/, media/ or test/ changed, that no agentviz-ds-* folder is left in the system temp folder, and that no process you started is running. Search every file this plan committed for the PRIVATE_ sentinels being absent from real-sample output and for anything that looks like a real path, title or ID; report what you searched and the count found. Receipt: docs/development/data-sources/verdict.md.\n\nRules: the ten hard rules in the brief apply to every command you run. In short: no model usage, no credentials, no login or sign-out, never write under the real Codex home or Claude config folder, real data as key names, types and counts only, stop only processes you started, a blocker is a finding. Run a Plan worker; do not open cards, request plan approval or call finish self. Subagents only opus at effort medium or haiku at effort max. Never call something passed unless you ran it. Commit.",
+      "files": [
+        "docs/research/data-source-experiments.md",
+        "docs/ROADMAP.md",
+        "docs/development/data-sources/verdict.md"
+      ],
+      "avoid": [
+        "src/",
+        "media/",
+        "test/",
+        "package.json",
+        "package-lock.json",
+        ".vscodeignore",
+        "README.md",
+        "HANDOFF.md",
+        "ORCHESTRATION.md",
+        "workflows/",
+        ".agentboard/",
+        "AgentViz.code-workspace",
+        "docs/concepts/",
+        "docs/ui-exploration/"
+      ],
+      "checks": [
+        "syntax",
+        "unit"
+      ],
+      "reply": "The commit id, the report path, the verdict for each interface with its reason, the state of each known gap, the decision Robert has to make about a live test, and what was not covered."
+    }
+  ]
+}
