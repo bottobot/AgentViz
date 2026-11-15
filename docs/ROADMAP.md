@@ -120,4 +120,3 @@ Linux and VSCodium (lilguy) have never been run. The host runner exits as unveri
 1. **Launch the Station Observatory plan** (Phase 3)?
 2. **Start the data-source experiments** (Phase 4)? They need a plan or a card written first.
 3. **Task progress reads "Unavailable"** for real sessions on this PC (recorded 12 November, not rechecked): accept that for now? Nothing researched so far solves it.
-4. **Push.** The plan refresh commit is local only. The earlier 15 November commits are on `origin`.
