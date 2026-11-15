@@ -6,6 +6,14 @@
   "publisher": "agentviz-local",
   "private": true,
   "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bottobot/AgentViz.git"
+  },
+  "homepage": "https://github.com/bottobot/AgentViz#readme",
+  "bugs": {
+    "url": "https://github.com/bottobot/AgentViz/issues"
+  },
   "engines": {
     "vscode": "^1.96.0"
   },

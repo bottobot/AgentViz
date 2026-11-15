@@ -1,25 +1,92 @@
 # AgentViz
 
-A live picture of local Claude Code and Codex sessions in a separate VS Code editor tab.
+A live picture of what your Claude Code and Codex sessions are doing, in its own VS Code editor tab.
 
-Find a session by project, then saved name, then ID. Follow it through a stations map, agent lanes, task list progress, a file footprint and an activity strip. An example session lets you explore the view without showing real activity.
+A long agent run is hard to follow as a wall of text. AgentViz reads the transcripts that Claude Code and Codex already write on your machine and draws them: where the work went, which subagents ran and when, how far the agent's own task list has got, which files it touched, and what happened over the last thirty minutes.
 
-Status: a local development build, verified on Windows 11 with desktop VS Code. It is not published. Linux and VSCodium are not verified. See [Limits](#limits).
+It reads local files only. It makes no network requests, uses no model tokens, installs no hooks, starts no server and opens no port.
 
-## Run it
+![The AgentViz tab showing the built-in synthetic example session](https://raw.githubusercontent.com/bottobot/AgentViz/feat/first-activity-view/docs/images/agentviz-example.png)
 
-Requires desktop VS Code 1.96 or newer. Node 22 or newer is needed only for the tests and the packaging tool.
+*The built-in example session. Every name in it is synthetic.*
 
-During development:
+Status: version 0.3.0, a preview. Verified on Windows 11 with desktop VS Code. Linux and VSCodium are not verified. It is not in the VS Code Marketplace; install it from the release file. See [Limits](#limits).
 
-1. Open this workspace in VS Code.
-2. Press F5 and select **Run AgentViz**. This opens an Extension Development Host.
-3. In that window, click the AgentViz icon in the activity bar, or run **AgentViz: Open Activity** from the Command Palette. The gear in the AgentViz sidebar, and **Settings** in the tab, open AgentViz's settings (the Claude and Codex folders it reads).
-4. Choose a project, type part of a name or an ID, then pick a session. **Show example** shows the synthetic example.
+## Contents
 
-From a package: run `npm ci --ignore-scripts`, `npm run package`, then **Extensions: Install from VSIX** and choose `agent-viz-0.3.0.vsix`. The package uses a local publisher identifier (`agentviz-local`). Installing it is your decision; no check here installs it.
+- [What it shows](#what-it-shows)
+- [Install](#install)
+- [Use](#use)
+- [Settings](#settings)
+- [Finding a session](#finding-a-session)
+- [Reading the view](#reading-the-view)
+- [Sources and privacy](#sources-and-privacy)
+- [Opening a session from another extension](#opening-a-session-from-another-extension)
+- [Run from source](#run-from-source)
+- [Development checks and packaging](#development-checks-and-packaging)
+- [Limits](#limits)
+- [Licence](#licence)
 
-Running the extension needs no compilation and no installed dependency.
+## What it shows
+
+- **Where the work went.** A map of six fixed stations (files, edits, shell, network, agents, memory) with a count of the calls made to each, and a red dot after a tool error.
+- **Agent lanes.** The session and its subagents on one time axis, so you can see what ran in parallel and what ended.
+- **Task list progress.** Completed of total and the current item, taken from the agent's own task list.
+- **File activity.** Reads and edits per file, with a flag on files edited three or more times.
+- **Activity over time.** The last thirty minutes as a strip of bars, with marks for prompts, errors and compactions.
+- **Context window.** How full it is, when the source reports it.
+- **Details on click.** Click a station, a lane, a file or a bar to list the calls behind it, then one call to read its input, output, timing and tokens from the transcript.
+- **An example session.** Synthetic data, so you can explore the view, or show it to someone, without showing real activity.
+
+It follows both Claude Code and Codex sessions, and it never switches session on its own.
+
+## Install
+
+Requires desktop VS Code 1.96 or newer. Nothing else: the extension has no runtime dependencies and needs no compilation.
+
+1. Download `agent-viz-0.3.0.vsix` from the [latest release](https://github.com/bottobot/AgentViz/releases/latest).
+2. In VS Code, open the Extensions view, choose **...** at its top, then **Install from VSIX...**, and pick the file. Or run this in a terminal:
+
+   ```powershell
+   code --install-extension agent-viz-0.3.0.vsix
+   ```
+
+3. Reload the window when VS Code asks.
+
+Good to know:
+
+- The extension's identifier is `agentviz-local.agent-viz`. It is not in the Marketplace, so it does not update itself. To update, install a newer VSIX over it.
+- It runs on your own machine, beside the editor's interface. In a remote window it still reads the transcripts on the local machine.
+- It is switched off in a workspace you have not trusted (Restricted Mode).
+- To remove it, uninstall **AgentViz** in the Extensions view. It writes no files of its own; the only thing it stores is the ID of the session you last followed, in VS Code's own workspace storage.
+
+You can also build the VSIX yourself: see [Development checks and packaging](#development-checks-and-packaging).
+
+## Use
+
+1. Click the AgentViz icon in the activity bar, then **Open Activity**. Or run **AgentViz: Open Activity** from the Command Palette. The view opens as an editor tab.
+2. Pick a session in the **Session** list. By default the list holds the sessions that are running now in the workspace open in this window. Start a Claude Code or Codex session in that folder and it appears within about ten seconds, or press **Refresh**.
+3. Watch. The view updates about once per second while the tab is visible.
+4. Click a station, a lane, a file or a bar to see the calls behind it. Escape closes the details panel.
+
+If the list is empty:
+
+- **Show example** shows the synthetic example session. **Return to live** goes back.
+- To see sessions that have ended, set `agentviz.sessions` to `all`.
+- To see sessions from every project on the machine, set `agentviz.scope` to `all`.
+
+The gear in the AgentViz sidebar, and **Settings** in the tab, open these settings.
+
+## Settings
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `agentviz.sessions` | `live` | `live` lists only sessions that are running now. `all` lists past sessions too. |
+| `agentviz.scope` | `workspace` | `workspace` lists only sessions recorded in a folder of the open workspace, or below one. `all` lists every session in the configured folders. With no folder open, every session is listed. |
+| `agentviz.claudeRoot` | empty | The Claude configuration folder. Empty means the `.claude` folder in your home folder. |
+| `agentviz.codexRoot` | empty | The Codex configuration folder. Empty means the `.codex` folder in your home folder. |
+
+The two folder settings are machine settings: set them in your user settings, not in a workspace. [Sources and privacy](#sources-and-privacy) says exactly what is read from each folder and how "running now" is decided.
 
 ## Finding a session
 
@@ -103,7 +170,20 @@ A refused call opens no tab and leaves an open tab on its current session. The c
 
 A caller should check that the extension `agentviz-local.agent-viz` is installed before offering the action. No AgentBoard caller exists yet; adding one is a change in that project.
 
+## Run from source
+
+Running the extension from a checkout needs no compilation and no installed dependency.
+
+1. Clone the repository and open the folder in VS Code.
+2. Press F5 and select **Run AgentViz**. This opens an Extension Development Host.
+3. In that window, click the AgentViz icon in the activity bar, or run **AgentViz: Open Activity** from the Command Palette.
+4. Choose a project, type part of a name or an ID, then pick a session. **Show example** shows the synthetic example.
+
+The code is plain JavaScript: `src/` is the extension host (finding sessions, reading transcripts), `media/` is the view (SVG, CSS and JavaScript in a webview), and `test/` holds the checks below.
+
 ## Development checks and packaging
+
+Node 22 or newer is needed only for the tests and the packaging tool.
 
 ```powershell
 npm ci --ignore-scripts
@@ -116,6 +196,8 @@ npm run package:check    # lists the VSIX contents and checksums; fails on anyth
 ```
 
 Each check proves only what it names. `npm test` does not prove the extension works in VS Code; `npm run host` does that, and opens a VS Code window for about 40 seconds. `npm run host` and `npm run browser` write receipts under `artifacts/`, which is not committed.
+
+To install the package you built: **Extensions: Install from VSIX** and choose `agent-viz-0.3.0.vsix`. The package uses a local publisher identifier (`agentviz-local`). Installing it is your decision; no check here installs it.
 
 The VSIX holds eleven product files: `package.json`, this README, five files in `src/`, three in `media/` and the icon in `resources/`. `.vscodeignore` is an allow-list, so a new file in the checkout stays out until it is allowed. The archive's own checksum changes with every build because it stores build times; the per-file checksums printed by `npm run package:check` do not.
 
@@ -154,3 +236,9 @@ Other limits:
 - Symbolic links met during folder discovery are not followed.
 
 Replay controls, automatic discovery of additional account folders and an AgentBoard button remain for later work. No borrowed source code is included.
+
+## Licence
+
+No open-source licence has been granted yet: `package.json` says `UNLICENSED`. You may read the code and install the released package for your own use. Ask before reusing the code elsewhere.
+
+Problems and ideas: [open an issue](https://github.com/bottobot/AgentViz/issues).
