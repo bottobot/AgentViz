@@ -34,24 +34,7 @@ function cleanQuery(value) {
   const text = field => typeof value?.[field] === 'string' ? value[field].slice(0, 200) : '';
   return { seq: Number.isSafeInteger(value?.seq) && value.seq > 0 ? value.seq : 0, workspaceKey: WORKSPACE_KEY.test(text('workspaceKey')) ? value.workspaceKey : '', name: text('name'), id: text('id') };
 }
-// The frozen form of the same request (ORCHESTRATION.md, Parallel interface contract):
-// { requestId, workspaceKey, name, sessionId }. requestId is a nonnegative integer and the three filters are
-// strings, where empty means unfiltered. Anything else is malformed and the whole request is rejected (null);
-// nothing of it is repaired. Filter text is cut to the same length as above. Inside the host the request number
-// is `seq` and the session ID filter is `id`, as discovery already names them.
-// WARNING: only the inbound half is here. The answer still acknowledges in `lookup.seq`; the contract's top-level
-// `queryRequestId` is left to the joining discovery step, because a test it owns pins the fields of a host message.
-function frozenQuery(value) {
-  try {
-    const { requestId, workspaceKey, name, sessionId } = value;
-    if (!Number.isSafeInteger(requestId) || requestId < 0) return null;
-    if (typeof workspaceKey !== 'string' || typeof name !== 'string' || typeof sessionId !== 'string') return null;
-    if (workspaceKey && !WORKSPACE_KEY.test(workspaceKey)) return null;
-    return { seq: requestId, workspaceKey, name: name.slice(0, 200), id: sessionId.slice(0, 200) };
-  } catch { return null; }
-}
-const isFrozen = value => Boolean(value) && typeof value === 'object' && Object.prototype.hasOwnProperty.call(value, 'requestId');
-const emptyCatalog =() => ({ sessions: [], warnings: [], workspaces: [], total: 0, matched: 0, limit: 0, pending: { workspaces: 0, names: 0 }, walk: null });
+const emptyCatalog = () => ({ sessions: [], warnings: [], workspaces: [], total: 0, matched: 0, limit: 0, pending: { workspaces: 0, names: 0 }, walk: null });
 
 const PROVIDERS = ['claude', 'codex'];
 const SESSION_ID = /^[\w-]{1,128}$/;
@@ -147,9 +130,6 @@ function openPanel(context) {
     // The request the current catalogue was worked out for. A message is numbered as the answer to the view's
     // newest request only when it is: a request can arrive while a transcript is being read.
     let answered = query;
-    // The highest request number that can no longer be accepted. -1 until the view has sent a request, so a view
-    // that numbers its first request 0 is still heard.
-    let floor = -1;
     let selected;
     let reader;
     let lastWalk = 0;
@@ -250,24 +230,17 @@ function openPanel(context) {
       if (message.type === 'ready') {
         // A reloaded view starts its request numbering again, so its first request is taken as it comes.
         ready = true;
-        // Filters handed over with `ready` come in either form; a malformed frozen one is dropped for no filters.
-        const handed = isFrozen(message.query) ? frozenQuery(message.query) : message.query && typeof message.query === 'object' ? cleanQuery(message.query) : null;
-        query = handed || cleanQuery();
-        floor = handed ? query.seq : -1;
+        query = cleanQuery(message.query);
         // Asked again on the next pass when a pass is already running; that pass's list answers the old request.
         lastWalk = 0;
         lookupDue = true;
         void refresh(true);
       }
       else if (message.type === 'query') {
-        // The frozen form is checked strictly. The earlier { seq, id } form stays accepted until the joining
-        // discovery step retires it; its numbering starts at 1.
-        const frozen = isFrozen(message);
-        const next = frozen ? frozenQuery(message) : cleanQuery(message);
-        // Requests are numbered by the view; a malformed one, or one that arrives after a newer one, is ignored.
-        if (!next || next.seq <= (frozen ? floor : Math.max(floor, 0))) return;
+        const next = cleanQuery(message);
+        // Requests are numbered by the view; one that arrives after a newer one is ignored.
+        if (next.seq <= query.seq) return;
         query = next;
-        floor = next.seq;
         lookupDue = true;
         void refresh();
       }

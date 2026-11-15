@@ -1,5 +1,7 @@
 # P01 receipt: isolated Windows host harness
 
+> **Since this receipt (15 November 2026):** `test/run-extension-host.cjs` and its test were deleted. `npm run host` (`test/host-runner.js`) is the one runner. See `../agentviz-next-parallel-run.md`.
+
 Card `0fb23c`, branch `task/0fb23c`, parent plan card `6e96a7`. Taken 2026-11-12 on native Windows 11, Node v26.7.0.
 
 ## What was added

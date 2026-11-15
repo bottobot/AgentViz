@@ -2,7 +2,7 @@
   "name": "agent-viz",
   "displayName": "AgentViz",
   "description": "A local, live picture of Claude Code and Codex sessions in an editor tab.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "agentviz-local",
   "private": true,
   "license": "UNLICENSED",

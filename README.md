@@ -17,7 +17,7 @@ During development:
 3. In that window, click the AgentViz icon in the activity bar, or run **AgentViz: Open Activity** from the Command Palette. The gear in the AgentViz sidebar, and **Settings** in the tab, open AgentViz's settings (the Claude and Codex folders it reads).
 4. Choose a project, type part of a name or an ID, then pick a session. **Show example** shows the synthetic example.
 
-From a package: run `npm ci --ignore-scripts`, `npm run package`, then **Extensions: Install from VSIX** and choose `agent-viz-0.1.0.vsix`. The package uses a local publisher identifier (`agentviz-local`). Installing it is your decision; no check here installs it.
+From a package: run `npm ci --ignore-scripts`, `npm run package`, then **Extensions: Install from VSIX** and choose `agent-viz-0.2.0.vsix`. The package uses a local publisher identifier (`agentviz-local`). Installing it is your decision; no check here installs it.
 
 Running the extension needs no compilation and no installed dependency.
 
@@ -109,13 +109,13 @@ npm test                 # unit: Node tests on synthetic transcripts
 npm run check            # syntax of the production files
 npm run host             # real VS Code host, isolated temporary profile, synthetic sources
 npm run browser          # headless Edge or Chrome at 1280, 600 and 360 px
-npm run package          # builds agent-viz-0.1.0.vsix
+npm run package          # builds agent-viz-0.2.0.vsix
 npm run package:check    # lists the VSIX contents and checksums; fails on anything unexpected
 ```
 
 Each check proves only what it names. `npm test` does not prove the extension works in VS Code; `npm run host` does that, and opens a VS Code window for about 40 seconds. `npm run host` and `npm run browser` write receipts under `artifacts/`, which is not committed.
 
-The VSIX holds nine product files: `package.json`, this README, four files in `src/` and three in `media/`. `.vscodeignore` is an allow-list, so a new file in the checkout stays out until it is allowed. The archive's own checksum changes with every build because it stores build times; the per-file checksums printed by `npm run package:check` do not.
+The VSIX holds eleven product files: `package.json`, this README, five files in `src/`, three in `media/` and the icon in `resources/`. `.vscodeignore` is an allow-list, so a new file in the checkout stays out until it is allowed. The archive's own checksum changes with every build because it stores build times; the per-file checksums printed by `npm run package:check` do not.
 
 The packaging dependency overrides minimatch to a fixed upstream release series because VSCE 4.1.0 otherwise resolves a version flagged by npm audit. Development packages are not in the VSIX.
 
