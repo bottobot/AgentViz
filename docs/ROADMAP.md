@@ -4,7 +4,7 @@ Written 14 November 2026, last revised 15 November 2026 after Phases 0 and 1 wer
 
 ## The short version
 
-1. The working extension is in good shape: find a session, follow it, click for details. Version `0.2.0` is installed in your normal VS Code. It has not been used on a real session yet.
+1. The working extension is in good shape: find a session, follow it, click for details. Version `0.3.0` is installed in your normal VS Code. It has not been used on a real session yet.
 2. You chose the look on 12 November: the Station Observatory, built out into "something quite substantial". Its prototype, research, brief and eleven-step plan are in Git now, and the plan is refreshed and ready to launch.
 3. Two tracks can run side by side from here: build the Station Observatory "session world", and test better data sources (the 14 November research).
 
@@ -65,7 +65,7 @@ The Station Observatory prototype, both research reports, the brief and the plan
 
 ### Phase 2: use it (yours)
 
-`agent-viz-0.2.0.vsix` is installed in your normal VS Code. Reload the window, click the AgentViz icon in the activity bar, and follow a real session for a few days. Nearly all verification so far is on synthetic data, so what you notice matters. A copy of the VSIX is in the main folder.
+`agent-viz-0.3.0.vsix` is installed in your normal VS Code. Reload the window, click the AgentViz icon in the activity bar, and follow a real session for a few days. Nearly all verification so far is on synthetic data, so what you notice matters. A copy of the VSIX is in the main folder.
 
 ### Phase 3: the Station Observatory session world (the main build, ready to launch)
 
