@@ -304,6 +304,23 @@ test('every filter change asks the host with a numbered, trimmed request, and th
   ]);
 });
 
+// Only live sessions are listed (Robert, 2026-11-15): when the host says so, the wording does too.
+test('a list of running sessions is worded as live, and an empty one says no live sessions', () => {
+  const page = boot({ answer: false });
+  const sessions = catalogue();
+  const live = (seq, list) => answerFor(page, seq, list, { lookup: { seq, total: list.length, matched: list.length, limit: 80, pendingNames: 0, pendingWorkspaces: 0, live: true } });
+  live(1, sessions);
+  assert.match(page.elements.matches.textContent, /^6 live sessions found\.$/);
+  page.type('name-filter', 'login');
+  live(2, sessions.slice(0, 2));
+  assert.match(page.elements.matches.textContent, /^\d of \d live sessions match\./);
+  page.elements['clear-filters'].fire('click');
+  live(3, []);
+  assert.equal(page.options('session')[0].text, 'No live sessions found');
+  answerFor(page, 3, []);
+  assert.equal(page.options('session')[0].text, 'No local sessions found');
+});
+
 test('an answer to older filters is dropped, and the wait for the current answer is visible', () => {
   const page = boot({ answer: false });
   const sessions = catalogue();

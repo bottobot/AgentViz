@@ -183,8 +183,10 @@ class FamilyReader {
       const marker = `${path.sep}subagents${path.sep}`;
       const at = file.lastIndexOf(marker);
       rootIsChild = at !== -1 && path.basename(file).startsWith('agent-');
-      const base = rootIsChild ? file.slice(0, at + marker.length) : file.slice(0, -'.jsonl'.length) + marker;
-      const pool = files.filter(session => session.provider === 'claude' && session.file !== file && session.file.startsWith(base) && path.basename(session.file).startsWith('agent-'));
+      // A transcript listed once for several paths (hard links) has its subagents beside any one of those paths.
+      const names = rootIsChild ? [] : [file, ...(files.find(session => session.file === file)?.links || [])];
+      const bases = rootIsChild ? [file.slice(0, at + marker.length)] : names.map(name => name.slice(0, -'.jsonl'.length) + marker);
+      const pool = files.filter(session => session.provider === 'claude' && session.file !== file && bases.some(base => session.file.startsWith(base)) && path.basename(session.file).startsWith('agent-'));
       for (const session of pool) ids.add(session.sessionId);
       const checked = pool.slice(0, FAMILY_POOL);
       unchecked = pool.length - checked.length;
@@ -394,8 +396,79 @@ async function walkSources({ claudeRoot, codexRoot }) {
   }
   await walk(path.join(claudeRoot, 'projects'), 'claude', true);
   await walk(path.join(codexRoot, 'sessions'), 'codex', true);
-  files.sort((a, b) => b.modified - a.modified || a.id.localeCompare(b.id));
-  return { files, warnings };
+  const listed = oneRowPerFile(files);
+  listed.sort((a, b) => b.modified - a.modified || a.id.localeCompare(b.id));
+  return { files: listed, warnings };
+}
+
+// One row per transcript (Robert, 2026-11-15). A hard link is the same file under a second path: AgentBoard files a
+// worktree session under the main folder's project folder too, so that Claude Code's own history shows it. Measured
+// on 475 local sessions: 110 were listed twice this way. Paths count as one file only when the session ID and the
+// file on disk both match. The path that sorts first is kept, so the choice does not depend on what the session
+// has done so far. The other paths stay on the row as `links` (host only): the subagent transcripts sit beside
+// only one of the paths, and the family reader looks beside all of them.
+function oneRowPerFile(files) {
+  const groups = new Map();
+  for (const session of files) {
+    const key = `${session.provider}:${session.sessionId}:${session.identity}`;
+    const group = groups.get(key);
+    if (group) group.push(session);
+    else groups.set(key, [session]);
+  }
+  if (groups.size === files.length) return files;
+  return [...groups.values()].map(group => {
+    if (group.length === 1) return group[0];
+    const [kept, ...others] = group.sort((a, b) => a.file < b.file ? -1 : 1);
+    return { ...kept, links: others.map(session => session.file) };
+  });
+}
+
+// Which Claude sessions are running now (Robert, 2026-11-15: only live sessions are listed).
+// Verified local shape (2026-11-15, Claude Code 2.1.325): each running process writes <claudeRoot>/sessions/<pid>.json
+// holding {pid, sessionId, cwd, status, ...}: 12 files for 12 running processes. A process that died can leave its
+// file behind (seen in two other account folders), so the process itself is checked as well. Only pid and
+// sessionId are taken. Returns null when the folder does not exist (an older Claude Code): the caller then falls
+// back to LIVE_WINDOW, as it does for Codex, where no such record was found.
+// WARNING: disclosed limits. A Codex session, and a Claude session with no running-session folder, counts as live
+// only while its transcript was written in the last LIVE_WINDOW. A Claude session run from another configuration
+// folder (another account) is recorded there and is not seen as running here.
+const LIVE_WINDOW = 10 * 60 * 1000;
+const RUNNING_FILE = 64 * 1024;
+const RUNNING_LIMIT = 500;
+function processRuns(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return error.code === 'EPERM'; }
+}
+async function runningClaudeSessions(claudeRoot, warnings) {
+  const folder = path.join(claudeRoot, 'sessions');
+  let names;
+  try { names = await fs.readdir(folder); }
+  catch (error) {
+    if (error.code === 'ENOENT') return null;
+    warnings.push(`Running Claude sessions could not be read (${error.code || 'unknown'}).`);
+    return new Set();
+  }
+  const running = new Set();
+  for (const name of names.filter(name => /^\d{1,10}\.json$/.test(name)).slice(0, RUNNING_LIMIT)) {
+    let handle;
+    try {
+      handle = await fs.open(path.join(folder, name), 'r');
+      const buffer = Buffer.alloc(RUNNING_FILE);
+      const { bytesRead } = await handle.read(buffer, 0, RUNNING_FILE, 0);
+      const record = JSON.parse(buffer.subarray(0, bytesRead).toString('utf8'));
+      if (record?.pid === Number(name.slice(0, -5)) && typeof record.sessionId === 'string' && processRuns(record.pid)) running.add(record.sessionId);
+    } catch { /* A half-written, oversized or vanished record names no running session. */ }
+    finally { if (handle) await handle.close(); }
+  }
+  return running;
+}
+
+// The loaded workspace as one project: { path, name } from the host becomes an identity whose label is the name.
+function loadedWorkspace(value) {
+  const identity = workspaceIdentity(typeof value?.path === 'string' ? value.path : '');
+  const name = sessionTitle(value?.name);
+  return identity && name ? { key: identity.key, segments: [name], windows: false } : null;
 }
 
 // A folder as a comparable text: Windows paths without case, separators or a trailing slash; POSIX as written.
@@ -418,7 +491,7 @@ function scopeHome(scope, cwd) {
 const needle = value => typeof value === 'string' ? value.trim().toLowerCase() : '';
 
 // The host query contract (S03). `options` is a number (the response cap) or
-// { limit, query: { workspaceKey, name, id }, keep: [catalogue ids], walk, headBudget, titleBudget }.
+// { limit, query: { workspaceKey, name, id }, keep: [catalogue ids], walk, headBudget, titleBudget, scope, project, live }.
 // Order of work: list every transcript, group all of them by project, filter by project and ID, then by name,
 // and only then cut the matches to `limit`. `workspaces`, `total` and `matched` are never cut.
 // `keep` names sessions (the followed one) whose current metadata is returned in `kept` whatever the filters say.
@@ -436,6 +509,7 @@ async function discoverSessions(roots, options = {}) {
   const budget = { heads: settings.headBudget ?? HEAD_PASS, remaining: settings.titleBudget ?? TITLE_SCAN_BUDGET, cost };
   const pending = { workspaces: 0, names: 0 };
   let outsideScope = 0;
+  let notLive = 0;
   const entries = new Map();
   const unreadable = new Set();
   async function metadata(session, titles) {
@@ -459,10 +533,13 @@ async function discoverSessions(roots, options = {}) {
   // Scope (Robert, 2026-11-14): with `scope` set, only sessions whose recorded working folder is one of those
   // folders or below it (worktrees under .agentboard/wt included) are listed, counted or followed. A session whose
   // folder is not read yet waits outside until it is; one with no recorded folder stays outside.
-  // A session below a scope folder is grouped under that folder, so the project list holds one entry for each
-  // open folder and not one for every worktree or subfolder a session ran in.
+  // A project is the workspace loaded in the VS Code window (Robert, 2026-11-15): with `project` set ({ path, name }
+  // of the .code-workspace file), every session in any scope folder belongs to that one project. Without it (a
+  // window with a single folder and no workspace file) a session is grouped under the scope folder it sits in, so
+  // the project list never holds one entry for every worktree or subfolder a session ran in.
+  const project = loadedWorkspace(settings.project);
   const scope = Array.isArray(settings.scope)
-    ? settings.scope.map(folder => ({ root: scopePath(folder), identity: workspaceIdentity(typeof folder === 'string' ? folder.trim() : folder) })).filter(folder => folder.root && folder.identity)
+    ? settings.scope.map(folder => ({ root: scopePath(folder), identity: project || workspaceIdentity(typeof folder === 'string' ? folder.trim() : folder) })).filter(folder => folder.root && folder.identity)
     : null;
   const identities = new Map();
   const counts = new Map();
@@ -478,18 +555,26 @@ async function discoverSessions(roots, options = {}) {
     if (identity && !identities.has(identity.key)) identities.set(identity.key, identity);
     counts.set(session.workspaceKey, (counts.get(session.workspaceKey) || 0) + 1);
   }
-  if (scope) {
+  // Live only (Robert, 2026-11-15): with `live` set, only sessions that are running now are listed, counted or
+  // offered. A subagent transcript is not a row of its own: it is a lane of its session. The followed session
+  // (keep) stays followed after it ends.
+  const running = settings.live ? await runningClaudeSessions(roots.claudeRoot, warnings) : null;
+  const recent = Date.now() - LIVE_WINDOW;
+  const isLive = session => !session.child && (session.provider === 'claude' && running ? running.has(session.sessionId) : session.modified >= recent);
+  if (scope || settings.live) {
     let outside = 0;
     files = files.filter(session => {
-      const inside = Boolean(scopeHome(scope, entries.get(session)?.cwd));
+      const inside = !scope || Boolean(scopeHome(scope, entries.get(session)?.cwd));
       if (!inside) outside++;
-      return inside;
+      else if (settings.live && !isLive(session)) notLive++;
+      else return true;
+      return false;
     });
     for (const key of [...counts.keys()]) counts.delete(key);
     for (const session of files) counts.set(session.workspaceKey, (counts.get(session.workspaceKey) || 0) + 1);
     pending.workspaces = 0;
     for (const session of walked.files) if (session.workspaceKey === undefined) pending.workspaces++;
-    outsideScope = outside;
+    outsideScope = scope ? outside : 0;
     // Labels are told apart only among the projects that can be shown: the listed ones and the followed one.
     const shown = new Set([...files, ...kept].map(session => session.workspaceKey));
     for (const key of [...identities.keys()]) if (!shown.has(key)) identities.delete(key);
@@ -538,7 +623,7 @@ async function discoverSessions(roots, options = {}) {
     const listed = new Set(files.map(session => session.file));
     for (const file of metadataCache.keys()) if (!listed.has(file)) metadataCache.delete(file);
   }
-  return { sessions, kept, warnings: [...new Set(warnings)], total: files.length, matched: matches.length, limit, workspaces, pending, all: files, walk: walked, cost, outside: outsideScope };
+  return { sessions, kept, warnings: [...new Set(warnings)], total: files.length, matched: matches.length, limit, workspaces, pending, all: files, walk: walked, cost, outside: outsideScope, live: settings.live === true, notLive };
 }
 
 // Verified local shape (2026-11-12): <codexRoot>/session_index.jsonl holds appended lines {id, thread_name, updated_at}.

@@ -17,7 +17,7 @@ During development:
 3. In that window, click the AgentViz icon in the activity bar, or run **AgentViz: Open Activity** from the Command Palette. The gear in the AgentViz sidebar, and **Settings** in the tab, open AgentViz's settings (the Claude and Codex folders it reads).
 4. Choose a project, type part of a name or an ID, then pick a session. **Show example** shows the synthetic example.
 
-From a package: run `npm ci --ignore-scripts`, `npm run package`, then **Extensions: Install from VSIX** and choose `agent-viz-0.2.0.vsix`. The package uses a local publisher identifier (`agentviz-local`). Installing it is your decision; no check here installs it.
+From a package: run `npm ci --ignore-scripts`, `npm run package`, then **Extensions: Install from VSIX** and choose `agent-viz-0.3.0.vsix`. The package uses a local publisher identifier (`agentviz-local`). Installing it is your decision; no check here installs it.
 
 Running the extension needs no compilation and no installed dependency.
 
@@ -53,7 +53,9 @@ Quiet means no transcript records for thirty seconds. It is not a process health
 
 ## Sources and privacy
 
-AgentViz reads the `projects` folder inside your local `.claude` directory and the `sessions` folder plus `session_index.jsonl` inside your local `.codex` directory. The machine settings `agentviz.claudeRoot` and `agentviz.codexRoot` point it at other configuration folders. By default (`agentviz.scope`: `workspace`) it lists only sessions whose recorded working folder is an open workspace folder or below it, so worktrees under the workspace count and other projects do not. Those sessions are grouped under the open folder, so the project list holds one entry for each open folder; a session you open by ID stays followed wherever it is. Set `agentviz.scope` to `all` to list every session. With no folder open, every session is listed. No credentials, configuration files or environment variables are read.
+AgentViz reads the `projects` folder inside your local `.claude` directory and the `sessions` folder plus `session_index.jsonl` inside your local `.codex` directory. To tell which Claude sessions are running it also reads the process ID and session ID from the `sessions` folder inside `.claude`, and nothing else from it.
+
+Only live sessions are listed (`agentviz.sessions`: `live`, the default). A Claude session is live while its Claude Code process is running. Codex keeps no such record, so a Codex session is live while its transcript was written in the last 10 minutes; the same rule applies to Claude when the `sessions` folder is absent. A Claude session run from another configuration folder (another account) is not seen as running. A subagent is a lane of its session, not a row in the list. A session you are following stays followed after it ends. Set `agentviz.sessions` to `all` to list past sessions too. The machine settings `agentviz.claudeRoot` and `agentviz.codexRoot` point it at other configuration folders. By default (`agentviz.scope`: `workspace`) it lists only sessions whose recorded working folder is an open workspace folder or below it, so worktrees under the workspace count and other projects do not. A project is the workspace loaded in the VS Code window: every one of those sessions belongs to one project, named after the `.code-workspace` file (or after the folder, when the window holds a single folder and no workspace file). A transcript that sits on disk under two paths (a hard link, which AgentBoard makes for worktree sessions) is listed once. A session you open by ID stays followed wherever it is. Set `agentviz.scope` to `all` to list every session. With no folder open, every session is listed. No credentials, configuration files or environment variables are read.
 
 The view receives: opaque project keys with short labels, saved session names, session IDs, tool categories, safe tool names, file labels of at most two path segments, hostnames, a command's first word, task list labels, timestamps and outcomes. The live view does not receive prompts, reasoning, code, command arguments, tool output, file contents, patch bodies, full paths, or URL paths and queries. Those are read only when you open one call in the details panel: the host reads that call's records again from the transcript at the positions it noted (checking they still hold that call), sends them once, and keeps nothing. Encrypted reasoning is never read.
 
@@ -109,7 +111,7 @@ npm test                 # unit: Node tests on synthetic transcripts
 npm run check            # syntax of the production files
 npm run host             # real VS Code host, isolated temporary profile, synthetic sources
 npm run browser          # headless Edge or Chrome at 1280, 600 and 360 px
-npm run package          # builds agent-viz-0.2.0.vsix
+npm run package          # builds agent-viz-0.3.0.vsix
 npm run package:check    # lists the VSIX contents and checksums; fails on anything unexpected
 ```
 

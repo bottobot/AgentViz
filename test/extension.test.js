@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const { createSession } = require('../src/transcript');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-function host(discoverSessions, workspaceFolders, savedSelection, family, { open = true, root: firstRoot = 'old-root' } = {}) {
+function host(discoverSessions, workspaceFolders, savedSelection, family, { open = true, root: firstRoot = 'old-root', workspaceFile, sessions = 'all' } = {}) {
   const callbacks = {};
   const messages = [];
   const reads = [];
@@ -28,8 +28,9 @@ function host(discoverSessions, workspaceFolders, savedSelection, family, { open
     commands: { registerCommand: (name, callback) => { callbacks[name === 'agentviz.open' ? 'open' : name] = callback; return disposable; }, executeCommand: async (...args) => { executed.push(args); } },
     window: { createWebviewPanel: () => { counts.panels++; return panel; }, createTreeView: (id, options) => { views.push({ id, options }); return { visible: false, onDidChangeVisibility: callback => { callbacks.sidebar = callback; return disposable; }, dispose() {} }; }, showErrorMessage: message => { throw Error(message); } },
     workspace: {
-      workspaceFolders,
-      getConfiguration: () => ({ get: () => root }),
+      workspaceFolders, workspaceFile, name: 'Window name (Workspace)',
+      // Past fixture sessions are listed unless a test asks for the default (running sessions only).
+      getConfiguration: () => ({ get: key => key === 'sessions' ? sessions : root }),
       onDidChangeConfiguration: callback => { callbacks.config = callback; return disposable; }
     },
     Uri: { joinPath: (...parts) => parts.join('/') }, ViewColumn: { One: 1 }
@@ -179,6 +180,38 @@ test('the first selection follows the open folder by directory identity, not a m
   unproven.callbacks.dispose();
 });
 
+// A project is the workspace loaded in the window (Robert, 2026-11-15): discovery is told its file and its name.
+test('discovery is given the loaded workspace file as the one project, and nothing for a single folder', async () => {
+  const folders = [{ name: 'Alpha', uri: { scheme: 'file', fsPath: 'C:\\Work\\Alpha' } }, { name: 'Beta', uri: { scheme: 'file', fsPath: 'D:\\Tools\\Beta' } }];
+  const asked = async workspaceFile => {
+    const calls = [];
+    const instance = host((roots, options) => { calls.push(options); return Promise.resolve({ warnings: [], sessions: [] }); }, folders, undefined, undefined, { workspaceFile });
+    instance.callbacks.message({ type: 'ready' });
+    await flush();
+    instance.callbacks.dispose();
+    return { scope: [...calls[0].scope], project: calls[0].project && { ...calls[0].project } };
+  };
+  const scope = ['C:\\Work\\Alpha', 'D:\\Tools\\Beta'];
+  assert.deepEqual(await asked({ scheme: 'file', fsPath: 'C:\\Work\\Alpha\\Studio.code-workspace' }), { scope, project: { path: 'C:\\Work\\Alpha\\Studio.code-workspace', name: 'Studio' } });
+  assert.deepEqual(await asked({ scheme: 'untitled', toString: () => 'untitled:Untitled-1' }), { scope, project: { path: 'untitled:Untitled-1', name: 'Window name (Workspace)' } });
+  assert.deepEqual(await asked(undefined), { scope, project: undefined });
+});
+
+// Only live sessions are listed (Robert, 2026-11-15): that is the default, `all` turns it off, and the page is told.
+test('discovery is asked for running sessions only unless the setting says all, and the page is told which', async () => {
+  const asked = async sessions => {
+    const calls = [];
+    const instance = host((roots, options) => { calls.push(options); return Promise.resolve(answer([listed('claude:one')], undefined, { live: options.live === true })); }, undefined, undefined, undefined, { sessions });
+    instance.callbacks.message({ type: 'ready' });
+    await flush();
+    instance.callbacks.dispose();
+    return [calls[0].live, instance.messages.at(-1).lookup.live];
+  };
+  assert.deepEqual(await asked('live'), [true, true]);
+  assert.deepEqual(await asked(''), [true, true], 'anything but all means running sessions only');
+  assert.deepEqual(await asked('all'), [false, false]);
+});
+
 // S03: the host query contract. Synthetic catalogue; `all` is every session of the source, `sessions` the answer.
 const WS_A = `ws:${'a'.repeat(20)}`;
 const WS_B = `ws:${'b'.repeat(20)}`;
@@ -199,7 +232,7 @@ test('the host passes the filters and the followed session to discovery and answ
   assert.deepEqual([...calls[0].keep], []);
   assert.equal(calls[0].walk, undefined, 'the first lookup lists the folders');
   const message = instance.messages.at(-1);
-  assert.deepEqual({ ...message.lookup }, { seq: 5, total: 412, matched: 97, limit: 80, pendingNames: 5, pendingWorkspaces: 2, missing: false });
+  assert.deepEqual({ ...message.lookup }, { seq: 5, total: 412, matched: 97, limit: 80, pendingNames: 5, pendingWorkspaces: 2, missing: false, live: false });
   assert.deepEqual(message.workspaces.map(group => ({ ...group })), [{ key: WS_A, label: 'Example', count: 1 }, { key: 'ws:unknown', label: 'Unknown workspace', count: 0 }, { key: WS_B, label: '<b>x</b>', count: 3 }]);
   assert.equal(message.selected.id, 'claude:recent');
   assert.deepEqual(Object.keys(message.selected).sort(), Object.keys(message.sessions[0]).sort());
@@ -313,6 +346,21 @@ test('an older session can be followed by ID and stays followed through rename, 
   message = instance.messages.at(-1);
   assert.deepEqual([message.selectedId, message.selected.name, message.lookup.missing], ['claude:old', 'Back again', false]);
   assert.equal(instance.reads.length, reads + 1);
+
+  // The same file on disk is listed under its other path (a hard link was added): still followed, same reader.
+  current = answer(recent, [...recent, { ...old, name: 'Back again', identity: 'disk:1' }]);
+  await lookAgain('link');
+  const before = instance.readers.length;
+  current = answer(recent, [...recent, { ...old, id: 'claude:old-link', file: 'C:/PRIVATE_PATH/link.jsonl', name: 'Back again', identity: 'disk:1' }]);
+  await lookAgain('linked');
+  message = instance.messages.at(-1);
+  assert.deepEqual([message.selectedId, message.selected.name, message.lookup.missing], ['claude:old-link', 'Back again', false]);
+  assert.equal(instance.reads.at(-1), 'C:/PRIVATE_PATH/link.jsonl');
+  assert.equal(instance.readers.length, before);
+  // Another file with the same session ID is not it.
+  current = answer(recent, [...recent, { ...old, id: 'claude:old-copy', identity: 'disk:2' }]);
+  await lookAgain('copy');
+  assert.deepEqual([instance.messages.at(-1).selectedId, instance.messages.at(-1).lookup.missing], ['claude:old-link', true]);
   assert.doesNotMatch(JSON.stringify(instance.messages), /PRIVATE_|\.jsonl/);
   instance.callbacks.dispose();
 });

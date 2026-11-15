@@ -119,10 +119,12 @@
     const pendingNames = whole(lookup.pendingNames);
     const pendingWorkspaces = whole(lookup.pendingWorkspaces);
     const none = !total;
+    // The host lists only sessions that are running now unless told otherwise; the wording says which it is.
+    const liveWord = lookup.live === true ? 'live ' : '';
     paintWorkspaces(sessions, total);
 
     const placeholder = waiting && !nav.matches.length ? 'Looking up sessions…'
-      : none ? 'No local sessions found'
+      : none ? (liveWord ? 'No live sessions found' : 'No local sessions found')
       : !nav.matches.length ? (pendingNames || pendingWorkspaces ? 'No matches yet. Still reading sessions…' : 'No sessions match these filters')
       : exampleOverLive ? 'Example shown. Choose a session to follow it'
       : !nav.selected ? 'Choose a session'
@@ -141,7 +143,7 @@
     const notes = [waiting ? 'Looking up sessions…'
       : none ? ''
       : !nav.matches.length ? `No sessions match${pendingNames || pendingWorkspaces ? ' yet' : ''}. Clear filters to see all ${total}.`
-      : nav.active ? `${matched} of ${total} sessions match.` : `${total} sessions found.`];
+      : nav.active ? `${matched} of ${total} ${liveWord}sessions match.` : `${total} ${liveWord}sessions found.`];
     if (!waiting && matched > state.sessions.length && state.sessions.length) notes.push(`Showing the ${state.sessions.length} most recently written${nav.active ? ' matches' : ''}. Choose a project or narrow the search to reach older ones.`);
     if (pendingNames) notes.push(`Still reading saved names in ${pendingNames} sessions; more matches may appear.`);
     if (pendingWorkspaces) notes.push(`Still reading projects for ${pendingWorkspaces} sessions.`);

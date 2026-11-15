@@ -87,7 +87,8 @@ function realHost({ claudeRoot, codexRoot, sessions = require('../src/sessions')
     window: { createWebviewPanel: (type, title, column, options) => { created.push(options); return newPanel(options); }, createTreeView: () => ({ visible: false, onDidChangeVisibility: () => disposable(), dispose() {} }), showErrorMessage: message => { errors.push(message); } },
     workspace: {
       workspaceFolders: [],
-      getConfiguration: () => ({ get: key => roots[key] }),
+      // These fixtures are past sessions with fixed write times, so the list is not narrowed to running ones.
+      getConfiguration: () => ({ get: key => key === 'sessions' ? 'all' : roots[key] }),
       onDidChangeConfiguration: callback => { callbacks.config = callback; const item = disposable(); callbacks.configListener = item; return item; }
     },
     Uri: { joinPath: (...parts) => parts.join('/') }, ViewColumn: { One: 1 }

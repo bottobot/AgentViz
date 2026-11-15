@@ -589,7 +589,7 @@ const SHAPE = {
   message: ['lookup', 'selected', 'selectedId', 'sessions', 'snapshot', 'type', 'warnings', 'workspaces'],
   entry: ['child', 'id', 'modified', 'name', 'nameSource', 'project', 'provider', 'sessionId', 'workspaceKey', 'workspaceLabel'],
   workspace: ['count', 'key', 'label'],
-  lookup: ['limit', 'matched', 'missing', 'pendingNames', 'pendingWorkspaces', 'seq', 'total'],
+  lookup: ['limit', 'live', 'matched', 'missing', 'pendingNames', 'pendingWorkspaces', 'seq', 'total'],
   snapshot: ['bytesRead', 'context', 'droppedEvents', 'events', 'family', 'fileBytes', 'footprint', 'id', 'invalidLines', 'loading', 'oversizedLines', 'parent', 'progress', 'project', 'provider', 'startedAt', 'status', 'updatedAt'],
   event: ['id', 'kind', 'label', 'outcome', 'time'],
   family: ['eventLimit', 'found', 'lanes', 'limit', 'notes'],

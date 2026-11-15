@@ -68,6 +68,22 @@ function workspaceScope() {
   return folders.length ? folders : undefined;
 }
 
+// Only sessions that are running now are listed (Robert, 2026-11-15). `agentviz.sessions: all` lists past ones too.
+const liveOnly = () => vscode.workspace.getConfiguration('agentviz').get('sessions') !== 'all';
+
+// A project is the workspace loaded in this VS Code window (Robert, 2026-11-15): every listed session of its
+// folders is one project, named after the .code-workspace file. A window with one folder and no workspace file
+// has that folder as its project, so nothing is returned here.
+function workspaceProject() {
+  const file = vscode.workspace.workspaceFile;
+  if (!file) return undefined;
+  const saved = file.scheme === 'file' && typeof file.fsPath === 'string';
+  return {
+    path: saved ? file.fsPath : String(file),
+    name: (saved && path.basename(file.fsPath).replace(/\.code-workspace$/i, '')) || vscode.workspace.name || 'Untitled workspace'
+  };
+}
+
 let panel;
 // Set while a panel is open: makes that panel follow a session found in the current source.
 let follow;
@@ -150,7 +166,7 @@ function openPanel(context) {
           lookupDue = false;
           const roots = sourceRoots();
           // A new filter, or names still being read, reuses the last folder listing; the folders are listed again every 10 seconds.
-          let discovered = await discoverSessions(roots, { query: asked, keep: selected ? [selected.id] : [], walk: listingDue ? undefined : catalog.walk || undefined, scope: workspaceScope() });
+          let discovered = await discoverSessions(roots, { query: asked, keep: selected ? [selected.id] : [], walk: listingDue ? undefined : catalog.walk || undefined, scope: workspaceScope(), project: workspaceProject(), live: liveOnly() });
           if (disposed) return;
           // The source, the selection or the filters changed while this lookup ran: its answer is for an old
           // question. It is not shown, and the lookup is asked again on the next pass.
@@ -165,7 +181,7 @@ function openPanel(context) {
               || discovered.sessions[0] || all[0];
             if (first && first.name === undefined && discovered.walk) {
               // The first choice can be older than the returned list; read its own name before it is shown.
-              discovered = await discoverSessions(roots, { query: asked, keep: [first.id], walk: discovered.walk, scope: workspaceScope() });
+              discovered = await discoverSessions(roots, { query: asked, keep: [first.id], walk: discovered.walk, scope: workspaceScope(), project: workspaceProject(), live: liveOnly() });
               if (disposed) return;
               if (revision !== generation || asked !== query) { lookupDue = true; return; }
               all = discovered.all || discovered.sessions;
@@ -182,7 +198,12 @@ function openPanel(context) {
           if (listingDue) lastWalk = Date.now();
           // The followed session is looked up by its stable ID. It is never replaced by a neighbour: a transcript
           // that has left the source stays named and is reported as missing.
-          if (selected) selected = index.get(selected.id) || { ...selected, missing: true };
+          // A transcript that gains a second path (a hard link) can be listed under the other one from then on: the
+          // same session ID and the same file on disk is still the followed session, not a missing one.
+          const followed = selected;
+          if (followed) selected = index.get(followed.id)
+            || (followed.identity && all.find(session => session.provider === followed.provider && session.sessionId === followed.sessionId && session.identity === followed.identity))
+            || { ...followed, missing: true };
           lookupDue = lookupDue || catalog.pending.workspaces > 0 || catalog.pending.names > 0;
         }
         let snapshot = null;
@@ -201,7 +222,7 @@ function openPanel(context) {
           type: 'state', selectedId: selected?.id || '', selected: selected ? catalogueEntry(selected) : null, snapshot,
           sessions: catalog.sessions.map(catalogueEntry), workspaces: catalog.workspaces.map(workspaceEntry),
           lookup: { seq: answered === query ? query.seq : 0, total: count(catalog.total) || catalog.sessions.length, matched: count(catalog.matched) || catalog.sessions.length, limit: count(catalog.limit),
-            pendingNames: count(catalog.pending.names), pendingWorkspaces: count(catalog.pending.workspaces), missing: Boolean(selected?.missing) },
+            pendingNames: count(catalog.pending.names), pendingWorkspaces: count(catalog.pending.workspaces), missing: Boolean(selected?.missing), live: catalog.live === true },
           warnings
         });
       } catch (error) {

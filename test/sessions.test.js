@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { TranscriptReader, discoverSessions } = require('../src/sessions');
+const { TranscriptReader, FamilyReader, discoverSessions } = require('../src/sessions');
 
 async function temporary(t) {
   const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'agentviz-test-'));
@@ -320,6 +320,105 @@ test('a scope keeps only sessions in the workspace folders and their subfolders,
   assert.equal(keeping.sessions.some(session => session.sessionId === ids[1]), false);
   const unscoped = await discoverSessions({ claudeRoot, codexRoot });
   assert.equal(unscoped.total, 6);
+});
+
+// A project is the workspace loaded in the VS Code window (Robert, 2026-11-15): with a workspace file, the sessions
+// of all its folders are one project named after it; the followed session outside it keeps its own folder.
+test('a loaded workspace is one project across all of its folders', async (t) => {
+  const { claudeRoot, codexRoot, claudeDir, codexDir } = await roots(t);
+  const ids = ['a', 'b'].map(letter => `019a0000-cccc-7bbb-8ccc-00000000000${letter}`);
+  await fs.writeFile(path.join(claudeDir, 'first.jsonl'), prompt('C:\\Work\\Alpha'));
+  await fs.writeFile(path.join(claudeDir, 'worktree.jsonl'), prompt('C:\\Work\\Alpha\\.agentboard\\wt\\1a2b3c'));
+  await fs.writeFile(rollout(codexDir, ids[0]), codexMeta('D:\\Tools\\Beta\\src', ids[0]));
+  await fs.writeFile(rollout(codexDir, ids[1]), codexMeta('D:\\Elsewhere', ids[1]));
+  const scope = ['C:\\Work\\Alpha', 'D:\\Tools\\Beta'];
+  const project = { path: 'C:\\Work\\Alpha\\Studio.code-workspace', name: 'Studio' };
+  const loaded = await discoverSessions({ claudeRoot, codexRoot }, { scope, project });
+  assert.deepEqual(loaded.workspaces.map(group => [group.label, group.count]), [['Studio', 3]]);
+  assert.equal(new Set(loaded.sessions.map(session => session.workspaceKey)).size, 1);
+  assert.match(loaded.workspaces[0].key, /^ws:[0-9a-f]{20}$/);
+  assert.deepEqual([loaded.total, loaded.outside], [3, 1]);
+  // The same folders without a workspace file stay one project for each folder.
+  const folders = await discoverSessions({ claudeRoot, codexRoot }, { scope });
+  assert.deepEqual(folders.workspaces.map(group => [group.label, group.count]), [['Alpha', 2], ['Beta', 1]]);
+  const outside = (await discoverSessions({ claudeRoot, codexRoot })).sessions.find(session => session.sessionId === ids[1]);
+  const keeping = await discoverSessions({ claudeRoot, codexRoot }, { scope, project, keep: [outside.id] });
+  assert.deepEqual(keeping.kept.map(session => session.workspaceLabel), ['Elsewhere']);
+  // A project that is not usable text is ignored, and no scope means nothing to group.
+  const unusable = await discoverSessions({ claudeRoot, codexRoot }, { scope, project: { path: 7, name: '' } });
+  assert.deepEqual(unusable.workspaces.map(group => group.label), ['Alpha', 'Beta']);
+  assert.equal((await discoverSessions({ claudeRoot, codexRoot }, { project })).workspaces.length, 4);
+});
+
+// Live only (Robert, 2026-11-15): a Claude session is listed while the process named in its running-session
+// record runs; a Codex session, and Claude without that folder, while the transcript was written recently.
+test('live lists only running sessions, and the followed session stays after it ends', async (t) => {
+  const { claudeRoot, codexRoot, claudeDir, codexDir } = await roots(t);
+  const ids = ['a', 'b'].map(letter => `019a0000-dddd-7bbb-8ccc-00000000000${letter}`);
+  const ended = require('node:child_process').spawnSync(process.execPath, ['-e', '']).pid;
+  const registry = path.join(claudeRoot, 'sessions');
+  await fs.mkdir(path.join(claudeDir, 'running', 'subagents'), { recursive: true });
+  for (const name of ['running', 'ended', 'unlisted', 'mismatch']) await fs.writeFile(path.join(claudeDir, `${name}.jsonl`), prompt('C:\\Work\\Alpha'));
+  await fs.writeFile(path.join(claudeDir, 'running', 'subagents', 'agent-one.jsonl'), prompt('C:\\Work\\Alpha'));
+  await fs.writeFile(rollout(codexDir, ids[0]), codexMeta('C:\\Work\\Alpha', ids[0]));
+  await fs.writeFile(rollout(codexDir, ids[1]), codexMeta('C:\\Work\\Alpha', ids[1]));
+  await fs.utimes(rollout(codexDir, ids[1]), new Date(Date.now() - 3600000), new Date(Date.now() - 3600000));
+  await fs.utimes(path.join(claudeDir, 'ended.jsonl'), new Date(), new Date());
+  const everything = await discoverSessions({ claudeRoot, codexRoot });
+  assert.deepEqual([everything.total, everything.live, everything.notLive], [7, false, 0]);
+
+  // No running-session folder (an older Claude Code): every provider falls back to the recent-write rule.
+  const fallback = await discoverSessions({ claudeRoot, codexRoot }, { live: true });
+  assert.deepEqual(fallback.all.map(session => session.sessionId).sort(), [ids[0], 'ended', 'mismatch', 'running', 'unlisted'].sort());
+
+  await fs.mkdir(registry);
+  await fs.writeFile(path.join(registry, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: 'running', cwd: 'PRIVATE_PATH' }));
+  await fs.writeFile(path.join(registry, `${ended}.json`), JSON.stringify({ pid: ended, sessionId: 'ended' }));
+  // A record whose name and pid disagree, a damaged one and a file that is not a record name nothing.
+  await fs.writeFile(path.join(registry, '1.json'), JSON.stringify({ pid: process.pid, sessionId: 'mismatch' }));
+  await fs.writeFile(path.join(registry, '2.json'), '{"pid":2,"sessionId":');
+  await fs.writeFile(path.join(registry, `${process.pid}.0123abcd`), JSON.stringify({ pid: process.pid, sessionId: 'unlisted' }));
+  const live = await discoverSessions({ claudeRoot, codexRoot }, { live: true, scope: ['C:\\Work\\Alpha'] });
+  assert.deepEqual(live.all.map(session => session.sessionId).sort(), [ids[0], 'running']);
+  assert.deepEqual([live.total, live.live, live.notLive, live.outside], [2, true, 5, 0]);
+  assert.deepEqual(live.workspaces.map(group => [group.label, group.count]), [['Alpha', 2]]);
+  assert.doesNotMatch(JSON.stringify({ ...live, walk: null, all: null, sessions: live.sessions.map(publicFields) }), /PRIVATE_/);
+  // The subagent transcript is not a row, and is still there for the session's lanes.
+  assert.equal(live.walk.files.some(session => session.sessionId === 'one'), true);
+  // A session that has ended stays followed when it is the viewer's choice.
+  const followed = everything.all.find(session => session.sessionId === 'ended');
+  const keeping = await discoverSessions({ claudeRoot, codexRoot }, { live: true, keep: [followed.id] });
+  assert.deepEqual(keeping.kept.map(session => session.sessionId), ['ended']);
+  assert.equal(keeping.all.some(session => session.sessionId === 'ended'), false);
+});
+
+// One row per transcript (Robert, 2026-11-15): a hard link is the same file under a second path, as AgentBoard
+// makes for a worktree session. It is listed and counted once, and its subagents are found beside either path.
+test('a transcript stored under two paths is listed once and keeps its subagents', async (t) => {
+  const { claudeRoot, codexRoot, claudeDir } = await roots(t);
+  const worktreeDir = path.join(claudeRoot, 'projects', 'zz-worktree-project');
+  await fs.mkdir(path.join(worktreeDir, 'linked', 'subagents'), { recursive: true });
+  await fs.writeFile(path.join(worktreeDir, 'linked.jsonl'), prompt('C:\\Work\\Alpha\\.agentboard\\wt\\1a2b3c'));
+  await fs.writeFile(path.join(worktreeDir, 'linked', 'subagents', 'agent-one.jsonl'), prompt('C:\\Work\\Alpha\\.agentboard\\wt\\1a2b3c'));
+  await fs.link(path.join(worktreeDir, 'linked.jsonl'), path.join(claudeDir, 'linked.jsonl'));
+  // Two different files that share a name are two sessions and both stay.
+  await fs.writeFile(path.join(worktreeDir, 'copied.jsonl'), prompt('C:\\Work\\Alpha'));
+  await fs.writeFile(path.join(claudeDir, 'copied.jsonl'), prompt('C:\\Work\\Alpha'));
+  const found = await discoverSessions({ claudeRoot, codexRoot }, { scope: ['C:\\Work\\Alpha'] });
+  const rows = id => found.all.filter(session => session.sessionId === id);
+  const folders = id => rows(id).map(session => path.basename(path.dirname(session.file)));
+  // The path that sorts first is kept, whatever sits beside it; the other path stays on the row, host only.
+  assert.deepEqual(folders('linked'), ['encoded-project']);
+  assert.deepEqual(rows('linked')[0].links, [path.join(worktreeDir, 'linked.jsonl')]);
+  assert.deepEqual(folders('copied').sort(), ['encoded-project', 'zz-worktree-project']);
+  assert.equal(rows('copied').some(session => session.links), false);
+  assert.equal(found.total, 4);
+  assert.deepEqual(found.workspaces.map(group => [group.label, group.count]), [['Alpha', 4]]);
+  // The subagent transcript sits beside the path that was not kept, and is still found for the session.
+  const family = await new FamilyReader('claude', 'linked').members(rows('linked')[0].file, found.walk.files);
+  assert.deepEqual(family.members.map(member => member.sessionId), ['one']);
+  const again = await discoverSessions({ claudeRoot, codexRoot }, { scope: ['C:\\Work\\Alpha'] });
+  assert.deepEqual(again.all.map(session => session.id), found.all.map(session => session.id));
 });
 
 // SPEC: S01, metadata lookup is read only.

@@ -14,7 +14,7 @@ Checked on 15 November 2026: `npm test` 145 of 145, `npm run check` exit 0, `npm
 
 Built and working (Windows 11, desktop VS Code):
 
-- Find a session by project, saved name and ID. By default only sessions of the open workspace are listed, with one project entry per open folder.
+- Find a session by project, saved name and ID. By default only live sessions of the open workspace are listed, as one project named after the workspace loaded in the window. A transcript stored under two paths is listed once.
 - Stations map, agent lanes, task list progress, file footprint, 30-minute activity strip.
 - Details on click: the calls behind a station, lane, file or bar, read again from the transcript on request.
 - Sidebar icon, Settings button, and `agentviz.openSession` for another extension to call.

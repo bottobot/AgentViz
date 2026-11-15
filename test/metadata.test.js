@@ -32,7 +32,7 @@ function host(discoverSessions, root = 'synthetic-root') {
   const vscode = {
     commands: { registerCommand: (name, callback) => { callbacks[name] = callback; return disposable; } },
     window: { createWebviewPanel: () => panel, createTreeView: () => ({ visible: false, onDidChangeVisibility: () => disposable, dispose() {} }), showErrorMessage: message => { throw Error(message); } },
-    workspace: { workspaceFolders: undefined, getConfiguration: () => ({ get: () => root }), onDidChangeConfiguration: () => disposable },
+    workspace: { workspaceFolders: undefined, getConfiguration: () => ({ get: key => key === 'sessions' ? 'all' : root }), onDidChangeConfiguration: () => disposable },
     Uri: { joinPath: (...parts) => parts.join('/') }, ViewColumn: { One: 1 }
   };
   const module = { exports: {} };

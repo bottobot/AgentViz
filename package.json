@@ -2,7 +2,7 @@
   "name": "agent-viz",
   "displayName": "AgentViz",
   "description": "A local, live picture of Claude Code and Codex sessions in an editor tab.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "agentviz-local",
   "private": true,
   "license": "UNLICENSED",
@@ -82,7 +82,20 @@
           "type": "string",
           "default": "",
           "scope": "machine",
-          "description": "Claude configuration folder. Empty uses the local .claude folder. Only its projects folder is read."
+          "description": "Claude configuration folder. Empty uses the local .claude folder. Only its projects folder is read, plus the process and session IDs in its sessions folder, to tell which sessions are running."
+        },
+        "agentviz.sessions": {
+          "type": "string",
+          "enum": [
+            "live",
+            "all"
+          ],
+          "enumDescriptions": [
+            "Only sessions that are running now. A Claude session is running while its Claude Code process is; a Codex session while its transcript was written in the last 10 minutes.",
+            "Past sessions too."
+          ],
+          "default": "live",
+          "description": "Whether AgentViz lists only running sessions. A session you are following stays followed after it ends."
         },
         "agentviz.scope": {
           "type": "string",
@@ -91,7 +104,7 @@
             "all"
           ],
           "enumDescriptions": [
-            "Only sessions recorded in an open workspace folder or below it (worktrees included), grouped under that folder.",
+            "Only sessions recorded in a folder of the workspace loaded in this window, or below one (worktrees included). They are one project, named after the workspace.",
             "Every session in the configured Claude and Codex folders."
           ],
           "default": "workspace",
