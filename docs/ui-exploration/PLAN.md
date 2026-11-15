@@ -4,7 +4,11 @@ Design study started 11 November 2026. Reviewable mock-ups completed 12 November
 
 ## Recommendation
 
-Start with **Activity desk** as the everyday default. It puts the latest event, errors and context ahead of the visualization. **Station landscape** is the strongest candidate for a distinctive optional view. **Session filmstrip** is useful when understanding sequence matters enough to justify replay work.
+**Selected direction, 12 November 2026:** Robert chose to develop Station landscape into a substantial animated, inspectable experience. The new `station.html` prototype implements landscape -> station -> resource -> event inspection, with synthetic inputs, outputs, API responses, error messages, patches, shell output, agent handoffs and plan updates. It has playback, a time scrubber, speed, an optional flat map, keyboard controls and reduced-motion support. Open it directly in a browser alongside `station.css` and `station.js`.
+
+This follow-up uses a separate 42-call synthetic story with two errors, rather than the original gallery's fixed 76-call comparison snapshot. The moving signals, counters, resource lists and detail payloads all derive from the same example event list. No real session data or network calls are involved. The current extension's privacy boundary is unchanged; showing real inputs and outputs would require a separate explicit design decision about sensitive data.
+
+Original recommendation before that selection: start with **Activity desk** as the everyday default. It puts the latest event, errors and context ahead of the visualization. **Station landscape** is the strongest candidate for a distinctive optional view. **Session filmstrip** is useful when understanding sequence matters enough to justify replay work.
 
 These are design hypotheses, not results from user testing. The deliverable is a choice of directions, not a decision to ship all three.
 
